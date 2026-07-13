@@ -1,3 +1,3 @@
 # YouTube Private Invitations
 
-> Browser extension to quickly invite people to private YouTube videos
+> Browser extension to quickly invite emails to private YouTube videos
