@@ -31,14 +31,6 @@ function addStyles() {
       #${buttonId} { background: #0f0f0f; border: 0; border-radius: 2px; color: #fff; cursor: pointer; font: 500 13px/20px Roboto, Arial, sans-serif; height: 32px; margin-left: 8px; padding: 0 12px; }
       #${buttonId}:disabled { cursor: wait; opacity: 0.6; }
       #${statusId} { background: #0f0f0f; border-radius: 2px; bottom: 24px; color: #fff; font: 400 13px/20px Roboto, Arial, sans-serif; left: 24px; max-width: 420px; padding: 12px 16px; position: fixed; z-index: 2147483647; }
-      .youtube-private-invitations-dialog { background: rgba(15, 15, 15, 0.48); inset: 0; position: fixed; z-index: 2147483647; }
-      .youtube-private-invitations-dialog form { background: #fff; border-radius: 4px; box-shadow: 0 12px 32px rgba(15, 15, 15, 0.28); box-sizing: border-box; color: #0f0f0f; font: 400 14px/20px Roboto, Arial, sans-serif; left: 50%; max-width: calc(100vw - 48px); padding: 20px; position: fixed; top: 50%; transform: translate(-50%, -50%); width: 420px; }
-      .youtube-private-invitations-dialog h2 { font: 500 18px/24px Roboto, Arial, sans-serif; margin: 0 0 12px; }
-      .youtube-private-invitations-dialog textarea { border: 1px solid #d0d0d0; border-radius: 2px; box-sizing: border-box; font: 400 14px/20px Roboto, Arial, sans-serif; min-height: 128px; padding: 8px; resize: vertical; width: 100%; }
-      .youtube-private-invitations-dialog menu { display: flex; gap: 8px; justify-content: flex-end; margin: 16px 0 0; padding: 0; }
-      .youtube-private-invitations-dialog button { border: 0; border-radius: 2px; cursor: pointer; font: 500 13px/20px Roboto, Arial, sans-serif; padding: 8px 12px; }
-      .youtube-private-invitations-dialog button[type='button'] { background: transparent; color: #606060; }
-      .youtube-private-invitations-dialog button[type='submit'] { background: #0f0f0f; color: #fff; }
     </style>`,
   );
 }
@@ -117,16 +109,14 @@ async function sharePrivately() {
       throw new Error('Select one or more videos in YouTube Studio first');
     }
 
-    const nativeInvitees = await collectNativeInvitees(firstVideoId);
-    const invitees =
-      nativeInvitees === null ? await askForInvitees() : nativeInvitees;
+    const invitees = await collectNativeInvitees(firstVideoId);
 
     if (invitees.length === 0) {
       throw new Error('Add at least one invitee email address');
     }
 
     for (const [index, videoId] of videoIds
-      .slice(nativeInvitees === null ? 0 : 1)
+      .slice(1)
       .entries()) {
       showStatus(`Sharing ${index + 1} of ${videoIds.length}: ${videoId}`);
       await applyInvitees(videoId, invitees);
@@ -146,15 +136,15 @@ async function sharePrivately() {
 
 async function collectNativeInvitees(videoId: string) {
   if (!(await openPrivateShareDialog(videoId))) {
-    return null;
+    throw new Error(`Could not open private-share dialog for ${videoId}`);
   }
 
   const dialog = await waitForPrivateShareDialog();
 
-  return await new Promise<string[] | null>((resolve) => {
+  return await new Promise<string[]>((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       dialog.removeEventListener('click', readInvitees, true);
-      resolve(null);
+      reject(new Error('Timed out waiting for the private-share Done button'));
     }, 30000);
 
     function readInvitees(event: MouseEvent) {
@@ -322,50 +312,6 @@ async function waitForPrivateShareDialog() {
   }
 
   return dialog;
-}
-
-async function askForInvitees() {
-  return await new Promise<string[]>((resolve) => {
-    document.documentElement.insertAdjacentHTML(
-      'beforeend',
-      `<div class="youtube-private-invitations-dialog">
-        <form>
-          <h2>Share privately</h2>
-          <textarea autofocus placeholder="person@example.com&#10;team@example.com"></textarea>
-          <menu>
-            <button type="button">Cancel</button>
-            <button type="submit">Apply</button>
-          </menu>
-        </form>
-      </div>`,
-    );
-
-    const dialog = requireElement(
-      document.querySelector<HTMLElement>(
-        '.youtube-private-invitations-dialog',
-      ),
-      'Invitee entry dialog',
-    );
-    const textarea = requireElement(
-      dialog.querySelector('textarea'),
-      'Invitee entry textarea',
-    );
-
-    requireElement(dialog.querySelector('form'), 'Invitee entry form')
-      .addEventListener('submit', (event) => {
-        event.preventDefault();
-        dialog.remove();
-        resolve(parseEmails(textarea.value));
-      });
-    requireElement(
-      dialog.querySelector('button[type="button"]'),
-      'Invitee entry cancel button',
-    ).addEventListener('click', () => {
-        dialog.remove();
-        resolve([]);
-      });
-    textarea.focus();
-  });
 }
 
 async function waitFor<ElementType extends Element>(
