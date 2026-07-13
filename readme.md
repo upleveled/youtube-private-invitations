@@ -29,10 +29,11 @@ Test the manual workflow:
 2. Go to Content
 3. Select one or more private videos
 4. Click `Share privately` in the bulk-actions toolbar
-5. Add invitee emails in YouTube's native dialog and click Done
-6. Wait for the status message to finish applying invitees
+5. Add emails to `Add invitees`, `Remove invitees`, or both
+6. Click Apply
+7. Wait for the status message to finish applying invitees
 
-The extension applies the same invitee list to every selected video, disables notification emails, and waits 1-3 seconds between videos.
+The extension applies the same add/remove changes to every selected video, disables notification emails, and waits 1-3 seconds between videos.
 
 ## Development
 
