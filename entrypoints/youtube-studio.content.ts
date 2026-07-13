@@ -92,7 +92,7 @@ export default defineContentScript({
 
             await openPrivateShareDialog(videoIds[0]);
 
-            const firstDialog = await waitFor(
+            const firstDialog = await getElement(
               () =>
                 Array.from(
                   document.querySelectorAll<HTMLElement>(
@@ -100,13 +100,9 @@ export default defineContentScript({
                   ),
                 ).find((element) => {
                   return element.textContent.includes('Share video privately');
-                }) || null,
-              5000,
+                }),
+              'YouTube private-share dialog',
             );
-
-            if (!firstDialog) {
-              throw new Error('Could not find the YouTube private-share dialog');
-            }
 
             const dialog = firstDialog;
             const invitees = await new Promise<string[]>((resolve, reject) => {
@@ -153,7 +149,7 @@ export default defineContentScript({
 
               await openPrivateShareDialog(videoId);
 
-              const nextDialog = await waitFor(
+              const nextDialog = await getElement(
                 () =>
                   Array.from(
                     document.querySelectorAll<HTMLElement>(
@@ -161,25 +157,17 @@ export default defineContentScript({
                     ),
                   ).find((element) => {
                     return element.textContent.includes('Share video privately');
-                  }) || null,
-                5000,
+                  }),
+                'YouTube private-share dialog',
               );
 
-              if (!nextDialog) {
-                throw new Error('Could not find the YouTube private-share dialog');
-              }
-
-              const input = await waitFor(
+              const input = await getElement(
                 () =>
                   nextDialog.querySelector<HTMLInputElement>(
                     '#text-input[aria-label="Invitees"]',
                   ),
-                3000,
+                'private-share email input',
               );
-
-              if (!input) {
-                throw new Error('Could not find the private-share email input');
-              }
 
               const inputValueDescriptor = Object.getOwnPropertyDescriptor(
                 Object.getPrototypeOf(input),
@@ -304,7 +292,7 @@ async function openPrivateShareDialog(videoId: string) {
 
   visibilityControl.click();
 
-  const menuShareButton = await waitFor(
+  const menuShareButton = await getElement(
     () =>
       Array.from(document.querySelectorAll<HTMLElement>(clickableSelector)).find(
         (element) => {
@@ -312,22 +300,18 @@ async function openPrivateShareDialog(videoId: string) {
             element.textContent.trim(),
           );
         },
-      ) || null,
-    3000,
+      ),
+    `private-share menu item for ${videoId}`,
   );
-
-  if (!menuShareButton) {
-    throw new Error(`Could not find private-share menu item for ${videoId}`);
-  }
 
   menuShareButton.click();
 }
 
-async function waitFor<ElementType extends Element>(
-  findElement: () => ElementType | null,
-  timeoutMs: number,
+async function getElement<ElementType extends Element>(
+  findElement: () => ElementType | null | undefined,
+  description: string,
 ) {
-  return await new Promise<ElementType | null>((resolve) => {
+  return await new Promise<ElementType>((resolve, reject) => {
     const existingElement = findElement();
 
     if (existingElement) {
@@ -348,8 +332,8 @@ async function waitFor<ElementType extends Element>(
 
     timeout = window.setTimeout(() => {
       observer.disconnect();
-      resolve(null);
-    }, timeoutMs);
+      reject(new Error(`Could not find ${description}`));
+    }, 5000);
     observer.observe(document.body, {
       childList: true,
       subtree: true,
