@@ -14,9 +14,9 @@ export default defineContentScript({
     document.documentElement.insertAdjacentHTML(
       'beforeend',
       `<style>
-        #${buttonId} { background: #0f0f0f; border: 0; border-radius: 2px; color: #fff; cursor: pointer; font: 500 13px/20px Roboto, Arial, sans-serif; height: 32px; margin-left: 8px; padding: 0 12px; }
+        #${buttonId} { background-color: var(--ytcp-text-primary, #0f0f0f); border: 0; border-radius: var(--ytcp-m-border-radius, 2px); color: var(--ytcp-text-primary-inverse, #fff); cursor: pointer; font: 500 13px/20px Roboto, Arial, sans-serif; height: 32px; margin-left: 8px; padding: 0 12px; }
         #${buttonId}:disabled { cursor: wait; opacity: 0.6; }
-        #${statusId} { background: #0f0f0f; border-radius: 2px; bottom: 24px; color: #fff; font: 400 13px/20px Roboto, Arial, sans-serif; left: 24px; max-width: 420px; padding: 12px 16px; position: fixed; z-index: 2147483647; }
+        #${statusId} { align-items: center; background-color: var(--ytcp-text-primary, #0f0f0f); border-radius: var(--ytcp-m-border-radius, 2px); bottom: 8px; box-shadow: 0 2px 5px 0 rgba(0, 0, 0, .26); box-sizing: border-box; color: var(--ytcp-text-primary-inverse, #fff); display: flex; font: 400 14px/20px Roboto, Arial, sans-serif; left: 8px; max-width: 288px; min-height: 48px; min-width: 288px; padding: 8px 12px; pointer-events: auto; position: fixed; z-index: 20000; }
       </style>`,
     );
 
