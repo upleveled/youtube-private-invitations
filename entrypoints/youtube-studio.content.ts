@@ -50,7 +50,7 @@ export default defineContentScript({
       const button = document.getElementById(buttonId);
 
       if (!(button instanceof HTMLButtonElement)) {
-        throw new Error('Could not find Share privately button');
+        throw new Error('Could not find "Share privately" button');
       }
 
       button.addEventListener('click', () => {
