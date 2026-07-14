@@ -31,7 +31,7 @@ export default defineContentScript({
       </style>`,
     );
 
-    function addShareButton() {
+    function addSharePrivatelyAction() {
       if (document.getElementById(buttonId)) {
         return;
       }
@@ -239,7 +239,66 @@ export default defineContentScript({
                 });
               }
 
-              await openPrivateShareDialog(videoId);
+              const link = document.querySelector(
+                `a[href*="/video/${CSS.escape(videoId)}"]`,
+              );
+
+              if (!link) {
+                throw new Error(`Could not find video row link for ${videoId}`);
+              }
+
+              const row = link.closest(rowSelector);
+
+              if (!row) {
+                throw new Error(`Could not find video row for ${videoId}`);
+              }
+
+              const clickableSelector =
+                'button, tp-yt-paper-button, ytcp-button, ytcp-dropdown-trigger, [role="button"]';
+              const shareButton = Array.from(
+                row.querySelectorAll<HTMLElement>(clickableSelector),
+              ).find((element) => {
+                return ['Share privately', 'Share video privately'].includes(
+                  element.textContent.trim(),
+                );
+              });
+
+              if (shareButton) {
+                shareButton.click();
+              } else {
+                const visibilityControl = [
+                  'ytcp-video-visibility-select',
+                  '[aria-label*="Visibility"]',
+                  '[test-id*="VISIBILITY"]',
+                  '[id*="visibility" i]',
+                ]
+                  .map((selector) => {
+                    return row.querySelector<HTMLElement>(selector);
+                  })
+                  .find((element) => {
+                    return element !== null;
+                  });
+
+                if (!visibilityControl) {
+                  throw new Error(`Could not find visibility control for ${videoId}`);
+                }
+
+                visibilityControl.click();
+
+                const menuShareButton = await getElement(
+                  () =>
+                    Array.from(
+                      document.querySelectorAll<HTMLElement>(clickableSelector),
+                    ).find((element) => {
+                      return ['Share privately', 'Share video privately'].includes(
+                        element.textContent.trim(),
+                      );
+                    }),
+                  `private-share menu item for ${videoId}`,
+                );
+
+                menuShareButton.click();
+              }
 
               const nextDialog = await getElement(
                 () =>
@@ -356,76 +415,14 @@ export default defineContentScript({
       });
     }
 
-    addShareButton();
+    addSharePrivatelyAction();
 
-    new MutationObserver(addShareButton).observe(document.body, {
+    new MutationObserver(addSharePrivatelyAction).observe(document.body, {
       childList: true,
       subtree: true,
     });
   },
 });
-
-async function openPrivateShareDialog(videoId: string) {
-  const link = document.querySelector(`a[href*="/video/${CSS.escape(videoId)}"]`);
-
-  if (!link) {
-    throw new Error(`Could not find video row link for ${videoId}`);
-  }
-
-  const row = link.closest(rowSelector);
-
-  if (!row) {
-    throw new Error(`Could not find video row for ${videoId}`);
-  }
-
-  const clickableSelector =
-    'button, tp-yt-paper-button, ytcp-button, ytcp-dropdown-trigger, [role="button"]';
-  const shareButton = Array.from(
-    row.querySelectorAll<HTMLElement>(clickableSelector),
-  ).find((element) => {
-    return ['Share privately', 'Share video privately'].includes(
-      element.textContent.trim(),
-    );
-  });
-
-  if (shareButton) {
-    shareButton.click();
-    return;
-  }
-
-  const visibilityControl = [
-    'ytcp-video-visibility-select',
-    '[aria-label*="Visibility"]',
-    '[test-id*="VISIBILITY"]',
-    '[id*="visibility" i]',
-  ]
-    .map((selector) => {
-      return row.querySelector<HTMLElement>(selector);
-    })
-    .find((element) => {
-      return element !== null;
-    });
-
-  if (!visibilityControl) {
-    throw new Error(`Could not find visibility control for ${videoId}`);
-  }
-
-  visibilityControl.click();
-
-  const menuShareButton = await getElement(
-    () =>
-      Array.from(document.querySelectorAll<HTMLElement>(clickableSelector)).find(
-        (element) => {
-          return ['Share privately', 'Share video privately'].includes(
-            element.textContent.trim(),
-          );
-        },
-      ),
-    `private-share menu item for ${videoId}`,
-  );
-
-  menuShareButton.click();
-}
 
 async function getElement<ElementType extends Element>(
   findElement: () => ElementType | null | undefined,
