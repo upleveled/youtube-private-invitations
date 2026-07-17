@@ -1,22 +1,18 @@
 /* eslint-disable no-restricted-syntax -- Content script automation reads and edits YouTube Studio DOM */
 
 import { defineContentScript } from 'wxt/utils/define-content-script';
+import {
+  assertStudioVideoRowStillMatchesVideo,
+  findInviteeChip,
+  getSelectedStudioVideos,
+  isOpenPrivateShareDialog,
+  isOpenVisibilityPopup,
+} from '../util/youtubeStudio.js';
 
 const buttonId = 'youtube-private-invitations-share-private';
 const statusId = 'youtube-private-invitations-status';
-
-type ApplyResult = {
-  videoId: string;
-  added: string[];
-  removed: string[];
-  skipped: boolean;
-  error?: string;
-};
-
-type StatusItem = {
-  text: string;
-  status: 'success' | 'neutral' | 'error';
-};
+const isolatedMessageSource = 'youtube-private-invitations-isolated';
+const mainWorldMessageSource = 'youtube-private-invitations-main';
 
 export default defineContentScript({
   matches: ['https://studio.youtube.com/*'],
@@ -27,15 +23,19 @@ export default defineContentScript({
       `<style>
         #${buttonId} { appearance: none; background: none; border: 0; cursor: pointer; margin: 0; }
         #${buttonId}:disabled { cursor: wait; opacity: 0.6; }
-        #${statusId} { align-items: center; background-color: var(--ytcp-text-primary, #0f0f0f); border-radius: var(--ytcp-m-border-radius, 2px); bottom: 8px; box-shadow: 0 2px 5px 0 rgba(0, 0, 0, .26); box-sizing: border-box; color: var(--ytcp-text-primary-inverse, #fff); display: flex; font: 400 14px/20px Roboto, Arial, sans-serif; gap: 8px; left: 8px; max-width: 420px; min-height: 48px; min-width: 288px; padding: 8px 12px; pointer-events: auto; position: fixed; z-index: 20000; }
-        #${statusId} .youtube-private-invitations-status-content { flex: 1; max-height: 240px; overflow-y: auto; }
-        #${statusId} ul { list-style: none; margin: 4px 0 0; padding: 0; }
-        #${statusId} li { align-items: flex-start; display: flex; gap: 6px; }
-        #${statusId} .youtube-private-invitations-status-icon { align-items: center; display: inline-flex; flex: 0 0 auto; height: 20px; }
+        #${statusId} { align-items: start; background-color: var(--ytcp-text-primary, #0f0f0f); border-radius: var(--ytcp-m-border-radius, 2px); bottom: 24px; box-shadow: 0 2px 5px 0 rgba(0, 0, 0, .26); box-sizing: border-box; color: var(--ytcp-text-primary-inverse, #fff); display: grid; font: 400 14px/20px Roboto, Arial, sans-serif; gap: 12px; grid-template-columns: minmax(0, max-content) auto; left: 24px; max-width: calc(100vw - 48px); min-height: 48px; min-width: 288px; padding: 12px 16px; pointer-events: auto; position: fixed; width: fit-content; z-index: 20000; }
+        #${statusId} .youtube-private-invitations-status-content { max-height: 240px; max-width: 560px; min-width: 0; overflow-y: auto; }
+        #${statusId} .youtube-private-invitations-status-title { color: var(--ytcp-text-primary-inverse, #fff); font: 500 14px/20px Roboto, Arial, sans-serif; }
+        #${statusId} .youtube-private-invitations-status-detail { align-items: baseline; color: var(--ytcp-text-primary-inverse, #fff); display: flex; font: 400 13px/18px Roboto, Arial, sans-serif; gap: 6px; margin-top: 2px; min-width: 0; }
+        #${statusId} .youtube-private-invitations-status-detail-label { flex: 0 0 auto; font-weight: 500; }
+        #${statusId} .youtube-private-invitations-status-detail-value { overflow-wrap: anywhere; }
+        #${statusId} ul { list-style: none; margin: 8px 0 0; padding: 0; }
+        #${statusId} li { align-items: flex-start; display: flex; font: 400 13px/18px Roboto, Arial, sans-serif; gap: 6px; }
+        #${statusId} .youtube-private-invitations-status-icon { align-items: center; display: inline-flex; flex: 0 0 auto; height: 18px; }
         #${statusId} .youtube-private-invitations-status-icon-success { color: #81c995; }
         #${statusId} .youtube-private-invitations-status-icon-neutral { color: #9aa0a6; }
         #${statusId} .youtube-private-invitations-status-icon-error { color: #f28b82; }
-        #${statusId} .youtube-private-invitations-status-reload { align-self: flex-start; appearance: none; background: none; border: 0; border-radius: var(--ytcp-m-border-radius, 2px); color: #3ea6ff; cursor: pointer; flex: 0 0 auto; font: 500 14px/20px Roboto, Arial, sans-serif; margin: -2px -4px 0 0; padding: 6px 8px; text-transform: uppercase; white-space: nowrap; }
+        #${statusId} .youtube-private-invitations-status-reload { appearance: none; background: none; border: 0; border-radius: var(--ytcp-m-border-radius, 2px); color: #3ea6ff; cursor: pointer; font: 500 14px/20px Roboto, Arial, sans-serif; margin: -6px -8px 0 0; padding: 6px 8px; text-transform: uppercase; white-space: nowrap; }
         #${statusId} .youtube-private-invitations-status-reload:hover { background: rgba(62, 166, 255, .1); }
         .youtube-private-invitations-backdrop { background-color: var(--iron-overlay-backdrop-background-color, #000); inset: 0; opacity: var(--iron-overlay-backdrop-opacity, .6); position: fixed; z-index: 2203; }
         .youtube-private-invitations-dialog { background: var(--paper-dialog-background-color, var(--primary-background-color, #fff)); border-radius: var(--ytcp-dialog-border-radius, var(--ytcp-xxl-border-radius, 12px)); box-shadow: var(--ytcp-dialog-box-shadow, 0 16px 24px 2px rgba(0, 0, 0, .14), 0 6px 30px 5px rgba(0, 0, 0, .12), 0 8px 10px -5px rgba(0, 0, 0, .4)); box-sizing: border-box; color: var(--paper-dialog-color, var(--primary-text-color, #0f0f0f)); display: flex; flex-direction: column; font-family: Roboto, Noto, sans-serif; left: 50%; max-width: 576px; outline: none; position: fixed; top: 50%; transform: translate(-50%, -50%); width: 576px; z-index: 2204; }
@@ -90,63 +90,7 @@ export default defineContentScript({
           try {
             button.disabled = true;
 
-            const selectedVideos: { row: Element; videoId: string }[] = [];
-
-            for (const row of document.querySelectorAll('ytcp-video-row')) {
-              if (!row.querySelector('[role="checkbox"][aria-checked="true"]')) {
-                continue;
-              }
-
-              const link =
-                row.querySelector<HTMLAnchorElement>('a[href*="/video/"]');
-
-              if (!link) {
-                throw new Error('Selected video row has no Studio video link');
-              }
-
-              const match = link.href.match(/\/video\/(?<videoId>[^/?#]+)/u);
-
-              if (!match || !match.groups || !match.groups.videoId) {
-                throw new Error(`Could not read video ID from ${link.href}`);
-              }
-
-              selectedVideos.push({ row, videoId: match.groups.videoId });
-            }
-
-            if (selectedVideos.length === 0) {
-              throw new Error('Select one or more videos in YouTube Studio first');
-            }
-
-            const selectionLabel = document.querySelector(
-              'ytcp-bulk-actions .selection-label',
-            );
-
-            if (!selectionLabel) {
-              throw new Error(
-                'Could not find the YouTube Studio selection count',
-              );
-            }
-
-            const selectionLabelMatch =
-              selectionLabel.textContent.match(/(?<count>\d+) selected/u);
-
-            if (
-              !selectionLabelMatch ||
-              !selectionLabelMatch.groups ||
-              !selectionLabelMatch.groups.count
-            ) {
-              throw new Error(
-                `Could not read the selection count from "${selectionLabel.textContent}"`,
-              );
-            }
-
-            if (
-              Number(selectionLabelMatch.groups.count) !== selectedVideos.length
-            ) {
-              throw new Error(
-                `YouTube shows ${selectionLabelMatch.groups.count} selected videos, but ${selectedVideos.length} checked rows were found`,
-              );
-            }
+            const selectedVideos = getSelectedStudioVideos();
 
             const backdrop = document.createElement('div');
             backdrop.className = 'youtube-private-invitations-backdrop';
@@ -257,7 +201,10 @@ export default defineContentScript({
                 }
 
                 try {
-                  const addEmails = getEmails('Add invitees', addTextarea.value);
+                  const addEmails = getEmails(
+                    'Add invitees',
+                    addTextarea.value,
+                  );
                   const removeEmails = getEmails(
                     'Remove invitees',
                     removeTextarea.value,
@@ -279,35 +226,49 @@ export default defineContentScript({
                         );
                       })
                     ) {
-                      validationErrors.push(`Do not add and remove ${addEmail}`);
+                      validationErrors.push(
+                        `Do not add and remove ${addEmail}`,
+                      );
                     }
                   }
 
                   if (validationErrors.length > 0) {
-                    showStatus(
+                    const statusMessage = getStatusMessage(
                       'Fix invitee changes',
-                      validationErrors.map((text) => {
-                        return { text, status: 'error' as const };
-                      }),
                     );
+                    const statusList = document.createElement('ul');
+
+                    for (const validationError of validationErrors) {
+                      appendStatusOutcome(statusList, 'error', validationError);
+                    }
+
+                    statusMessage.append(statusList);
+                    showStatus(statusMessage);
                     return;
                   }
 
                   resolve({ addEmails, removeEmails });
                 } catch (error) {
-                  showStatus('Fix invitee changes', [
-                    {
-                      text: error instanceof Error ? error.message : String(error),
-                      status: 'error',
-                    },
-                  ]);
+                  const statusMessage = getStatusMessage('Fix invitee changes');
+                  const statusList = document.createElement('ul');
+
+                  appendStatusOutcome(
+                    statusList,
+                    'error',
+                    error instanceof Error ? error.message : String(error),
+                  );
+                  statusMessage.append(statusList);
+                  showStatus(statusMessage);
                 }
               });
-              const cancelButton =
-                dialog.querySelector<HTMLButtonElement>('button[type="button"]');
+              const cancelButton = dialog.querySelector<HTMLButtonElement>(
+                'button[type="button"]',
+              );
 
               if (!cancelButton) {
-                throw new Error('Could not find manual private-share cancel button');
+                throw new Error(
+                  'Could not find manual private-share cancel button',
+                );
               }
 
               cancelButton.addEventListener('click', () => {
@@ -342,54 +303,10 @@ export default defineContentScript({
                 });
               }
 
-              if (!selectedVideo.row.isConnected) {
-                throw new Error(
-                  `Selected video row is no longer visible for ${selectedVideo.videoId}`,
-                );
-              }
-
-              const currentVideoLink =
-                selectedVideo.row.querySelector<HTMLAnchorElement>(
-                  'a[href*="/video/"]',
-                );
-
-              if (!currentVideoLink) {
-                throw new Error(
-                  `Selected video row lost its Studio video link for ${selectedVideo.videoId}`,
-                );
-              }
-
-              const currentVideoMatch = currentVideoLink.href.match(
-                /\/video\/(?<videoId>[^/?#]+)/u,
+              assertStudioVideoRowStillMatchesVideo(
+                selectedVideo.row,
+                selectedVideo.videoId,
               );
-
-              if (
-                !currentVideoMatch ||
-                !currentVideoMatch.groups ||
-                !currentVideoMatch.groups.videoId
-              ) {
-                throw new Error(
-                  `Could not read video ID from ${currentVideoLink.href}`,
-                );
-              }
-
-              if (currentVideoMatch.groups.videoId !== selectedVideo.videoId) {
-                throw new Error(
-                  `Selected video row changed from ${selectedVideo.videoId} to ${currentVideoMatch.groups.videoId}`,
-                );
-              }
-
-              function isOpenPrivateShareDialog(element: HTMLElement) {
-                const dialogElement =
-                  element.querySelector<HTMLElement>('[role="dialog"]');
-
-                return (
-                  dialogElement !== null &&
-                  !dialogElement.hidden &&
-                  dialogElement.getAttribute('aria-hidden') !== 'true' &&
-                  getComputedStyle(dialogElement).display !== 'none'
-                );
-              }
 
               if (
                 Array.from(
@@ -398,18 +315,8 @@ export default defineContentScript({
                   ),
                 ).some(isOpenPrivateShareDialog)
               ) {
-                throw new Error('Close the existing private-share dialog first');
-              }
-
-              function isOpenVisibilityPopup(element: HTMLElement) {
-                const popupDialog =
-                  element.querySelector<HTMLElement>('tp-yt-paper-dialog');
-
-                return (
-                  popupDialog !== null &&
-                  !popupDialog.hidden &&
-                  popupDialog.getAttribute('aria-hidden') !== 'true' &&
-                  getComputedStyle(popupDialog).display !== 'none'
+                throw new Error(
+                  'Close the existing private-share dialog first',
                 );
               }
 
@@ -470,18 +377,6 @@ export default defineContentScript({
 
               let videoChanged = false;
 
-              function findInviteeChip(email: string) {
-                return Array.from(
-                  nextDialog.querySelectorAll<HTMLElement>('ytcp-chip[aria-label]'),
-                ).find((element) => {
-                  const inviteeEmail = element.getAttribute('aria-label');
-                  return (
-                    inviteeEmail !== null &&
-                    inviteeEmail.toLowerCase() === email.toLowerCase()
-                  );
-                });
-              }
-
               if (emailChanges.addEmails.length > 0) {
                 const input = await getElement(
                   () =>
@@ -502,7 +397,7 @@ export default defineContentScript({
                 }
 
                 for (const addEmail of emailChanges.addEmails) {
-                  if (findInviteeChip(addEmail)) {
+                  if (findInviteeChip(nextDialog, addEmail)) {
                     skippedInviteeChanges.push(
                       `${addEmail} already invited for ${selectedVideo.videoId}`,
                     );
@@ -510,7 +405,9 @@ export default defineContentScript({
                   }
 
                   inputValueDescriptor.set.call(input, addEmail);
-                  input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+                  input.dispatchEvent(
+                    new InputEvent('input', { bubbles: true }),
+                  );
                   input.dispatchEvent(
                     new KeyboardEvent('keydown', {
                       bubbles: true,
@@ -530,8 +427,7 @@ export default defineContentScript({
                     }),
                   );
                   await getElement(
-                    () =>
-                      findInviteeChip(addEmail),
+                    () => findInviteeChip(nextDialog, addEmail),
                     `private-share chip for ${addEmail}`,
                   );
                   videoChanged = true;
@@ -539,7 +435,7 @@ export default defineContentScript({
               }
 
               for (const removeEmail of emailChanges.removeEmails) {
-                const chip = findInviteeChip(removeEmail);
+                const chip = findInviteeChip(nextDialog, removeEmail);
 
                 if (!chip) {
                   skippedInviteeChanges.push(
@@ -560,7 +456,7 @@ export default defineContentScript({
                 // dom-repeat reuses chip elements, so check aria-labels instead of the clicked chip
                 await getElement(
                   () =>
-                    findInviteeChip(removeEmail)
+                    findInviteeChip(nextDialog, removeEmail)
                       ? null
                       : nextDialog,
                   `removed chip for ${removeEmail}`,
@@ -581,7 +477,8 @@ export default defineContentScript({
 
                 await getElement(
                   () =>
-                    nextDialog.isConnected && isOpenPrivateShareDialog(nextDialog)
+                    nextDialog.isConnected &&
+                    isOpenPrivateShareDialog(nextDialog)
                       ? null
                       : nextDialog,
                   `closed private-share dialog for ${selectedVideo.videoId}`,
@@ -617,14 +514,9 @@ export default defineContentScript({
                 throw new Error('Could not find the Notify via email checkbox');
               }
 
-              if (notifyCheckbox.getAttribute('aria-checked') === 'true') {
-                notifyCheckbox.click();
-                await getElement(
-                  () =>
-                    notifyCheckbox.getAttribute('aria-checked') === 'false'
-                      ? notifyCheckbox
-                      : null,
-                  'unchecked Notify via email checkbox',
+              if (notifyCheckbox.getAttribute('aria-checked') !== 'false') {
+                throw new Error(
+                  'YouTube Studio now appears to enable the "Notify via email" checkbox by default in the "Share video privately" dialog. The extension did not add or remove invitees. Please report this at https://github.com/upleveled/youtube-private-invitations/issues',
                 );
               }
 
@@ -654,19 +546,16 @@ export default defineContentScript({
               );
 
               // Done only stages invitee changes - the visibility popup Save persists them
-              const saveButton = await getElement(
-                () => {
-                  const element = visibilityPopup.querySelector<HTMLElement>(
-                    'ytcp-button#save-button button',
-                  );
+              const saveButton = await getElement(() => {
+                const element = visibilityPopup.querySelector<HTMLElement>(
+                  'ytcp-button#save-button button',
+                );
 
-                  return element &&
-                    element.getAttribute('aria-disabled') !== 'true'
-                    ? element
-                    : null;
-                },
-                `enabled visibility popup Save button for ${selectedVideo.videoId}`,
-              );
+                return element &&
+                  element.getAttribute('aria-disabled') !== 'true'
+                  ? element
+                  : null;
+              }, `enabled visibility popup Save button for ${selectedVideo.videoId}`);
 
               saveButton.click();
 
@@ -703,7 +592,9 @@ export default defineContentScript({
                   .map((selectedVideo) => selectedVideo.videoId);
 
                 if (remainingVideoIds.length > 0) {
-                  showStatus(`Applying ${remainingVideoIds.length} more videos`);
+                  showStatus(
+                    `Applying ${remainingVideoIds.length} more videos`,
+                  );
 
                   const results = await requestApply({
                     videoIds: remainingVideoIds,
@@ -726,7 +617,7 @@ export default defineContentScript({
               }
             }
 
-            showStatus(
+            const statusMessage = getStatusMessage(
               failedInviteeChanges.length > 0
                 ? appliedVideoIds.length > 0
                   ? `Applied ${appliedVideoIds.length}, then stopped on a failure`
@@ -734,31 +625,60 @@ export default defineContentScript({
                 : appliedVideoIds.length > 0
                   ? `Applied changes to ${appliedVideoIds.length} videos`
                   : 'No changes needed',
-              [
-                ...appliedVideoIds.map((videoId) => {
-                  return { text: `Applied ${videoId}`, status: 'success' as const };
-                }),
-                ...failedInviteeChanges.map((text) => {
-                  return { text, status: 'error' as const };
-                }),
-                ...skippedInviteeChanges.map((text) => {
-                  return { text, status: 'neutral' as const };
-                }),
-              ],
-              true,
             );
+
+            if (emailChanges.addEmails.length > 0) {
+              appendStatusDetail(
+                statusMessage,
+                'Add',
+                emailChanges.addEmails.join(', '),
+              );
+            }
+
+            if (emailChanges.removeEmails.length > 0) {
+              appendStatusDetail(
+                statusMessage,
+                'Remove',
+                emailChanges.removeEmails.join(', '),
+              );
+            }
+
+            const statusList = document.createElement('ul');
+
+            for (const videoId of appliedVideoIds) {
+              appendStatusOutcome(statusList, 'success', `Applied ${videoId}`);
+            }
+
+            for (const failedInviteeChange of failedInviteeChanges) {
+              appendStatusOutcome(statusList, 'error', failedInviteeChange);
+            }
+
+            for (const skippedInviteeChange of skippedInviteeChanges) {
+              appendStatusOutcome(statusList, 'neutral', skippedInviteeChange);
+            }
+
+            if (statusList.children.length > 0) {
+              statusMessage.append(statusList);
+            }
+            showStatus(statusMessage, true);
           } finally {
             button.disabled = false;
           }
         })().catch((error: unknown) => {
           console.error(error);
-          showStatus(
+          const statusMessage = getStatusMessage(
             error instanceof Error ? error.message : String(error),
-            appliedVideoIds.map((videoId) => {
-              return { text: `Applied ${videoId}`, status: 'success' as const };
-            }),
-            true,
           );
+          const statusList = document.createElement('ul');
+
+          for (const videoId of appliedVideoIds) {
+            appendStatusOutcome(statusList, 'success', `Applied ${videoId}`);
+          }
+
+          if (statusList.children.length > 0) {
+            statusMessage.append(statusList);
+          }
+          showStatus(statusMessage, true);
         });
       });
     }
@@ -771,6 +691,105 @@ export default defineContentScript({
     });
   },
 });
+
+const statusIcons: Record<'error' | 'neutral' | 'success', string> = {
+  success:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+  neutral:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M19 13H5v-2h14z"/></svg>',
+  error:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+};
+
+function getStatusMessage(message: string) {
+  const fragment = document.createDocumentFragment();
+  const title = document.createElement('div');
+
+  title.className = 'youtube-private-invitations-status-title';
+  title.textContent = message;
+  fragment.append(title);
+
+  return fragment;
+}
+
+function appendStatusDetail(parent: DocumentFragment, label: string, value: string) {
+  const detail = document.createElement('div');
+  const labelElement = document.createElement('span');
+  const valueElement = document.createElement('span');
+
+  detail.className = 'youtube-private-invitations-status-detail';
+  labelElement.className = 'youtube-private-invitations-status-detail-label';
+  labelElement.textContent = label;
+  valueElement.className = 'youtube-private-invitations-status-detail-value';
+  valueElement.textContent = value;
+  detail.append(labelElement, valueElement);
+  parent.append(detail);
+}
+
+function appendStatusOutcome(
+  list: HTMLUListElement,
+  status: 'error' | 'neutral' | 'success',
+  text: string,
+) {
+  const listItem = document.createElement('li');
+
+  const icon = document.createElement('span');
+  icon.className = `youtube-private-invitations-status-icon youtube-private-invitations-status-icon-${status}`;
+  icon.innerHTML = statusIcons[status];
+  listItem.append(icon);
+
+  const textElement = document.createElement('span');
+  textElement.textContent = text;
+  listItem.append(textElement);
+
+  list.append(listItem);
+}
+
+function showStatus(message: string | Node, sticky = false) {
+  const status = document.getElementById(statusId);
+
+  if (status) {
+    status.remove();
+  }
+
+  document.documentElement.insertAdjacentHTML(
+    'beforeend',
+    `<div id="${statusId}"></div>`,
+  );
+
+  const newStatus = document.getElementById(statusId);
+
+  if (!newStatus) {
+    throw new Error('Could not create status message');
+  }
+
+  const content = document.createElement('div');
+  content.className = 'youtube-private-invitations-status-content';
+  content.append(message);
+
+  newStatus.append(content);
+
+  // Final messages stay until the user reloads, since Studio's cached invitee state is now stale
+  if (sticky) {
+    const reloadButton = document.createElement('button');
+    reloadButton.type = 'button';
+    reloadButton.className = 'youtube-private-invitations-status-reload';
+    reloadButton.textContent = 'Reload';
+    reloadButton.addEventListener('click', () => {
+      window.location.reload();
+    });
+    newStatus.append(reloadButton);
+    return;
+  }
+
+  window.setTimeout(() => {
+    const currentStatus = document.getElementById(statusId);
+
+    if (currentStatus && currentStatus.textContent === newStatus.textContent) {
+      currentStatus.remove();
+    }
+  }, 6000);
+}
 
 async function getElement<ElementType extends Element>(
   findElement: () => ElementType | null | undefined,
@@ -808,81 +827,13 @@ async function getElement<ElementType extends Element>(
   });
 }
 
-const statusIcons: Record<StatusItem['status'], string> = {
-  success:
-    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-  neutral:
-    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M19 13H5v-2h14z"/></svg>',
-  error:
-    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+type ApplyResult = {
+  videoId: string;
+  added: string[];
+  removed: string[];
+  skipped: boolean;
+  error?: string;
 };
-
-function showStatus(message: string, items: StatusItem[] = [], sticky = false) {
-  const status = document.getElementById(statusId);
-
-  if (status) {
-    status.remove();
-  }
-
-  document.documentElement.insertAdjacentHTML(
-    'beforeend',
-    `<div id="${statusId}"></div>`,
-  );
-
-  const newStatus = document.getElementById(statusId);
-
-  if (!newStatus) {
-    throw new Error('Could not create status message');
-  }
-
-  const content = document.createElement('div');
-  content.className = 'youtube-private-invitations-status-content';
-  content.append(message);
-
-  if (items.length > 0) {
-    const list = document.createElement('ul');
-
-    for (const item of items) {
-      const listItem = document.createElement('li');
-
-      const icon = document.createElement('span');
-      icon.className = `youtube-private-invitations-status-icon youtube-private-invitations-status-icon-${item.status}`;
-      icon.innerHTML = statusIcons[item.status];
-      listItem.append(icon);
-
-      const text = document.createElement('span');
-      text.textContent = item.text;
-      listItem.append(text);
-
-      list.append(listItem);
-    }
-
-    content.append(list);
-  }
-
-  newStatus.append(content);
-
-  // Final messages stay until the user reloads, since Studio's cached invitee state is now stale
-  if (sticky) {
-    const reloadButton = document.createElement('button');
-    reloadButton.type = 'button';
-    reloadButton.className = 'youtube-private-invitations-status-reload';
-    reloadButton.textContent = 'Reload';
-    reloadButton.addEventListener('click', () => {
-      window.location.reload();
-    });
-    newStatus.append(reloadButton);
-    return;
-  }
-
-  window.setTimeout(() => {
-    const currentStatus = document.getElementById(statusId);
-
-    if (currentStatus && currentStatus.textContent === newStatus.textContent) {
-      currentStatus.remove();
-    }
-  }, 6000);
-}
 
 // Apply invitee changes to the remaining videos over the InnerTube API in the MAIN world content script
 async function requestApply(target: {
@@ -909,7 +860,7 @@ async function requestApply(target: {
       };
 
       if (
-        data.source !== 'youtube-private-invitations-main' ||
+        data.source !== mainWorldMessageSource ||
         data.requestId !== requestId
       ) {
         return;
@@ -935,7 +886,7 @@ async function requestApply(target: {
     );
     window.postMessage(
       {
-        source: 'youtube-private-invitations-isolated',
+        source: isolatedMessageSource,
         type: 'apply',
         requestId,
         videoIds: target.videoIds,
@@ -956,7 +907,10 @@ async function requestSeedStatus() {
       let timeout = 0;
 
       function handleMessage(event: MessageEvent) {
-        if (event.source !== window || event.origin !== window.location.origin) {
+        if (
+          event.source !== window ||
+          event.origin !== window.location.origin
+        ) {
           return;
         }
 
@@ -970,7 +924,7 @@ async function requestSeedStatus() {
         };
 
         if (
-          data.source !== 'youtube-private-invitations-main' ||
+          data.source !== mainWorldMessageSource ||
           data.requestId !== requestId
         ) {
           return;
@@ -993,7 +947,7 @@ async function requestSeedStatus() {
       }, 15000);
       window.postMessage(
         {
-          source: 'youtube-private-invitations-isolated',
+          source: isolatedMessageSource,
           type: 'seed-status',
           requestId,
         },
@@ -1022,7 +976,7 @@ async function requestReset() {
       };
 
       if (
-        data.source !== 'youtube-private-invitations-main' ||
+        data.source !== mainWorldMessageSource ||
         data.requestId !== requestId ||
         data.type !== 'reset-result'
       ) {
@@ -1041,7 +995,7 @@ async function requestReset() {
     }, 15000);
     window.postMessage(
       {
-        source: 'youtube-private-invitations-isolated',
+        source: isolatedMessageSource,
         type: 'reset',
         requestId,
       },
