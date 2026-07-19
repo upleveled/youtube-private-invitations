@@ -3,6 +3,7 @@
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import {
   assertStudioVideoRowStillMatchesVideo,
+  initYoutubeStudio,
   findInviteeChip,
   getSelectedStudioVideos,
   isOpenPrivateShareDialog,
@@ -11,16 +12,20 @@ import {
 
 const buttonId = 'youtube-private-invitations-share-private';
 const statusId = 'youtube-private-invitations-status';
-const isolatedMessageSource = 'youtube-private-invitations-isolated';
-const mainWorldMessageSource = 'youtube-private-invitations-main';
 
 export default defineContentScript({
   matches: ['https://studio.youtube.com/*'],
-  runAt: 'document_idle',
+  world: 'MAIN',
+  runAt: 'document_start',
   main() {
-    document.documentElement.insertAdjacentHTML(
-      'beforeend',
-      `<style>
+    // The XHR and fetch patches must land at document_start, before Studio's first InnerTube requests
+    const youtubeStudio = initYoutubeStudio();
+
+    // The UI waits for the DOM, which does not exist yet at document_start
+    document.addEventListener('DOMContentLoaded', () => {
+      // Studio enforces Trusted Types, so build all extension DOM without HTML sinks like innerHTML
+      const style = document.createElement('style');
+      style.textContent = `
         #${buttonId} { appearance: none; background: none; border: 0; cursor: pointer; margin: 0; }
         #${buttonId}:disabled { cursor: wait; opacity: 0.6; }
         #${statusId} { align-items: start; background-color: var(--ytcp-text-primary, #0f0f0f); border-radius: var(--ytcp-m-border-radius, 2px); bottom: 24px; box-shadow: 0 2px 5px 0 rgba(0, 0, 0, .26); box-sizing: border-box; color: var(--ytcp-text-primary-inverse, #fff); display: grid; font: 400 14px/20px Roboto, Arial, sans-serif; gap: 12px; grid-template-columns: minmax(0, max-content) auto; left: 24px; max-width: calc(100vw - 48px); min-height: 48px; min-width: 288px; padding: 12px 16px; pointer-events: auto; position: fixed; width: fit-content; z-index: 20000; }
@@ -52,8 +57,16 @@ export default defineContentScript({
         .youtube-private-invitations-dialog button { border: 0; border-radius: 18px; box-sizing: border-box; cursor: pointer; font: 500 14px/20px Roboto, Arial, sans-serif; height: 36px; min-width: 36px; padding: 0 16px; }
         .youtube-private-invitations-dialog button[type='button'] { background: rgba(255, 255, 255, .1); color: var(--ytcp-text-primary, #0f0f0f); }
         .youtube-private-invitations-dialog button[type='submit'] { background: var(--ytcp-text-primary, #0f0f0f); color: var(--ytcp-text-primary-inverse, #fff); }
-      </style>`,
-    );
+      `;
+      document.documentElement.append(style);
+
+      addSharePrivatelyAction();
+
+      new MutationObserver(addSharePrivatelyAction).observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+    });
 
     function addSharePrivatelyAction() {
       if (document.getElementById(buttonId)) {
@@ -66,16 +79,12 @@ export default defineContentScript({
         return;
       }
 
-      toolbar.insertAdjacentHTML(
-        'beforeend',
-        `<button id="${buttonId}" class="label style-scope ytcp-bulk-actions" type="button">Share privately</button>`,
-      );
-
-      const button = document.getElementById(buttonId);
-
-      if (!(button instanceof HTMLButtonElement)) {
-        throw new Error('Could not find "Share privately" button');
-      }
+      const button = document.createElement('button');
+      button.id = buttonId;
+      button.className = 'label style-scope ytcp-bulk-actions';
+      button.type = 'button';
+      button.textContent = 'Share privately';
+      toolbar.append(button);
 
       button.addEventListener('click', (event) => {
         if (!event.isTrusted) {
@@ -102,36 +111,63 @@ export default defineContentScript({
               'aria-labelledby',
               'youtube-private-invitations-title',
             );
-            dialog.innerHTML = `<div class="header style-scope ytcp-dialog">
-                <div class="header-content style-scope ytcp-dialog">
-                  <h1 slot="primary-header" id="youtube-private-invitations-title" class="style-scope ytcp-private-video-sharing-dialog">Share privately</h1>
-                </div>
-              </div>
-              <div class="content style-scope ytcp-dialog">
-                <p class="description-text style-scope ytcp-private-video-sharing-dialog youtube-private-invitations-targets"></p>
-                <label class="youtube-private-invitations-field">
-                  <span>Add invitees</span>
-                  <textarea name="addEmails" autofocus></textarea>
-                </label>
-                <label class="youtube-private-invitations-field">
-                  <span>Remove invitees</span>
-                  <textarea name="removeEmails"></textarea>
-                </label>
-              </div>
-              <div class="footer style-scope ytcp-dialog">
-                <div slot="secondary-footer" class="style-scope ytcp-private-video-sharing-dialog">
-                  <button class="ytcpButtonShapeImplHost ytcpButtonShapeImpl--tonal ytcpButtonShapeImpl--mono ytcpButtonShapeImpl--size-m ytcpButtonShapeImpl--enable-backdrop-filter-experiment" type="button">Cancel</button>
-                  <button class="ytcpButtonShapeImplHost ytcpButtonShapeImpl--filled ytcpButtonShapeImpl--mono ytcpButtonShapeImpl--size-m ytcpButtonShapeImpl--enable-backdrop-filter-experiment" type="submit">Apply</button>
-                </div>
-              </div>`;
+            const header = document.createElement('div');
+            header.className = 'header style-scope ytcp-dialog';
+            const headerContent = document.createElement('div');
+            headerContent.className = 'header-content style-scope ytcp-dialog';
+            const title = document.createElement('h1');
+            title.id = 'youtube-private-invitations-title';
+            title.className = 'style-scope ytcp-private-video-sharing-dialog';
+            title.setAttribute('slot', 'primary-header');
+            title.textContent = 'Share privately';
+            headerContent.append(title);
+            header.append(headerContent);
 
-            const targets = dialog.querySelector<HTMLElement>(
-              '.youtube-private-invitations-targets',
-            );
+            const content = document.createElement('div');
+            content.className = 'content style-scope ytcp-dialog';
+            const targets = document.createElement('p');
+            targets.className =
+              'description-text style-scope ytcp-private-video-sharing-dialog youtube-private-invitations-targets';
 
-            if (!targets) {
-              throw new Error('Could not find selected video summary');
-            }
+            const addLabel = document.createElement('label');
+            addLabel.className = 'youtube-private-invitations-field';
+            const addLabelText = document.createElement('span');
+            addLabelText.textContent = 'Add invitees';
+            const addTextarea = document.createElement('textarea');
+            addTextarea.name = 'addEmails';
+            addTextarea.autofocus = true;
+            addLabel.append(addLabelText, addTextarea);
+
+            const removeLabel = document.createElement('label');
+            removeLabel.className = 'youtube-private-invitations-field';
+            const removeLabelText = document.createElement('span');
+            removeLabelText.textContent = 'Remove invitees';
+            const removeTextarea = document.createElement('textarea');
+            removeTextarea.name = 'removeEmails';
+            removeLabel.append(removeLabelText, removeTextarea);
+
+            content.append(targets, addLabel, removeLabel);
+
+            const footer = document.createElement('div');
+            footer.className = 'footer style-scope ytcp-dialog';
+            const footerButtons = document.createElement('div');
+            footerButtons.className =
+              'style-scope ytcp-private-video-sharing-dialog';
+            footerButtons.setAttribute('slot', 'secondary-footer');
+            const cancelButton = document.createElement('button');
+            cancelButton.className =
+              'ytcpButtonShapeImplHost ytcpButtonShapeImpl--tonal ytcpButtonShapeImpl--mono ytcpButtonShapeImpl--size-m ytcpButtonShapeImpl--enable-backdrop-filter-experiment';
+            cancelButton.type = 'button';
+            cancelButton.textContent = 'Cancel';
+            const applyButton = document.createElement('button');
+            applyButton.className =
+              'ytcpButtonShapeImplHost ytcpButtonShapeImpl--filled ytcpButtonShapeImpl--mono ytcpButtonShapeImpl--size-m ytcpButtonShapeImpl--enable-backdrop-filter-experiment';
+            applyButton.type = 'submit';
+            applyButton.textContent = 'Apply';
+            footerButtons.append(cancelButton, applyButton);
+            footer.append(footerButtons);
+
+            dialog.append(header, content, footer);
 
             targets.textContent = `${selectedVideos.length} selected: ${selectedVideos
               .map((selectedVideo) => {
@@ -174,22 +210,6 @@ export default defineContentScript({
                 }
 
                 return emails;
-              }
-
-              const addTextarea = dialog.querySelector<HTMLTextAreaElement>(
-                'textarea[name="addEmails"]',
-              );
-
-              if (!addTextarea) {
-                throw new Error('Could not find add invitees textarea');
-              }
-
-              const removeTextarea = dialog.querySelector<HTMLTextAreaElement>(
-                'textarea[name="removeEmails"]',
-              );
-
-              if (!removeTextarea) {
-                throw new Error('Could not find remove invitees textarea');
               }
 
               dialog.addEventListener('submit', (submitEvent) => {
@@ -261,16 +281,6 @@ export default defineContentScript({
                   showStatus(statusMessage);
                 }
               });
-              const cancelButton = dialog.querySelector<HTMLButtonElement>(
-                'button[type="button"]',
-              );
-
-              if (!cancelButton) {
-                throw new Error(
-                  'Could not find manual private-share cancel button',
-                );
-              }
-
               cancelButton.addEventListener('click', () => {
                 resolve(null);
               });
@@ -285,7 +295,7 @@ export default defineContentScript({
             }
 
             // Drop any stale capture so the seed check reads this run's write template, not a previous one
-            await requestReset();
+            youtubeStudio.resetLastMetadataUpdateCapture();
 
             // Drive the native dialog until one video actually changes, which seeds the API write template
             let seededIndex = -1;
@@ -465,7 +475,7 @@ export default defineContentScript({
               }
 
               if (!videoChanged) {
-                const cancelButton = await getElement(
+                const shareCancelButton = await getElement(
                   () =>
                     nextDialog.querySelector<HTMLElement>(
                       '#cancel-button button[aria-label="Cancel"]',
@@ -473,7 +483,7 @@ export default defineContentScript({
                   `private-share Cancel button for ${selectedVideo.videoId}`,
                 );
 
-                cancelButton.click();
+                shareCancelButton.click();
 
                 await getElement(
                   () =>
@@ -575,7 +585,8 @@ export default defineContentScript({
 
             if (seededVideo) {
               const seedVideoId = seededVideo.videoId;
-              const seedStatus = await requestSeedStatus();
+              const seedStatus =
+                await youtubeStudio.getMetadataUpdateStatus();
 
               if (!seedStatus.ok) {
                 // The native Save was rejected server-side, so stop instead of replaying the same invalid data
@@ -596,7 +607,7 @@ export default defineContentScript({
                     `Applying ${remainingVideoIds.length} more videos`,
                   );
 
-                  const results = await requestApply({
+                  const results = await youtubeStudio.applyInvitees({
                     videoIds: remainingVideoIds,
                     addEmails: emailChanges.addEmails,
                     removeEmails: emailChanges.removeEmails,
@@ -682,23 +693,14 @@ export default defineContentScript({
         });
       });
     }
-
-    addSharePrivatelyAction();
-
-    new MutationObserver(addSharePrivatelyAction).observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
   },
 });
 
-const statusIcons: Record<'error' | 'neutral' | 'success', string> = {
-  success:
-    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-  neutral:
-    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M19 13H5v-2h14z"/></svg>',
+const statusIconPaths: Record<'error' | 'neutral' | 'success', string> = {
+  success: 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
+  neutral: 'M19 13H5v-2h14z',
   error:
-    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+    'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
 };
 
 function getStatusMessage(message: string) {
@@ -735,7 +737,17 @@ function appendStatusOutcome(
 
   const icon = document.createElement('span');
   icon.className = `youtube-private-invitations-status-icon youtube-private-invitations-status-icon-${status}`;
-  icon.innerHTML = statusIcons[status];
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '16');
+  svg.setAttribute('height', '16');
+  svg.setAttribute('fill', 'currentColor');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', statusIconPaths[status]);
+  svg.append(path);
+  icon.append(svg);
   listItem.append(icon);
 
   const textElement = document.createElement('span');
@@ -752,16 +764,9 @@ function showStatus(message: string | Node, sticky = false) {
     status.remove();
   }
 
-  document.documentElement.insertAdjacentHTML(
-    'beforeend',
-    `<div id="${statusId}"></div>`,
-  );
-
-  const newStatus = document.getElementById(statusId);
-
-  if (!newStatus) {
-    throw new Error('Could not create status message');
-  }
+  const newStatus = document.createElement('div');
+  newStatus.id = statusId;
+  document.documentElement.append(newStatus);
 
   const content = document.createElement('div');
   content.className = 'youtube-private-invitations-status-content';
@@ -824,182 +829,5 @@ async function getElement<ElementType extends Element>(
       childList: true,
       subtree: true,
     });
-  });
-}
-
-type ApplyResult = {
-  videoId: string;
-  added: string[];
-  removed: string[];
-  skipped: boolean;
-  error?: string;
-};
-
-// Apply invitee changes to the remaining videos over the InnerTube API in the MAIN world content script
-async function requestApply(target: {
-  videoIds: string[];
-  addEmails: string[];
-  removeEmails: string[];
-}) {
-  return await new Promise<ApplyResult[]>((resolve, reject) => {
-    const requestId = crypto.randomUUID();
-
-    let timeout = 0;
-
-    function handleMessage(event: MessageEvent) {
-      if (event.source !== window || event.origin !== window.location.origin) {
-        return;
-      }
-
-      const data = event.data as {
-        source?: string;
-        type?: string;
-        requestId?: string;
-        results?: ApplyResult[];
-        message?: string;
-      };
-
-      if (
-        data.source !== mainWorldMessageSource ||
-        data.requestId !== requestId
-      ) {
-        return;
-      }
-
-      window.clearTimeout(timeout);
-      window.removeEventListener('message', handleMessage);
-
-      if (data.type === 'apply-result' && data.results) {
-        resolve(data.results);
-      } else {
-        reject(new Error(data.message || 'Private-share API apply failed'));
-      }
-    }
-
-    window.addEventListener('message', handleMessage);
-    timeout = window.setTimeout(
-      () => {
-        window.removeEventListener('message', handleMessage);
-        reject(new Error('Private-share API apply timed out'));
-      },
-      target.videoIds.length * 5000 + 30000,
-    );
-    window.postMessage(
-      {
-        source: isolatedMessageSource,
-        type: 'apply',
-        requestId,
-        videoIds: target.videoIds,
-        addEmails: target.addEmails,
-        removeEmails: target.removeEmails,
-      },
-      window.location.origin,
-    );
-  });
-}
-
-// Ask the MAIN world content script whether the seed video's captured metadata_update succeeded server-side
-async function requestSeedStatus() {
-  return await new Promise<{ ok: boolean; resultCode?: string }>(
-    (resolve, reject) => {
-      const requestId = crypto.randomUUID();
-
-      let timeout = 0;
-
-      function handleMessage(event: MessageEvent) {
-        if (
-          event.source !== window ||
-          event.origin !== window.location.origin
-        ) {
-          return;
-        }
-
-        const data = event.data as {
-          source?: string;
-          type?: string;
-          requestId?: string;
-          ok?: boolean;
-          resultCode?: string;
-          message?: string;
-        };
-
-        if (
-          data.source !== mainWorldMessageSource ||
-          data.requestId !== requestId
-        ) {
-          return;
-        }
-
-        window.clearTimeout(timeout);
-        window.removeEventListener('message', handleMessage);
-
-        if (data.type === 'seed-status-result') {
-          resolve({ ok: data.ok === true, resultCode: data.resultCode });
-        } else {
-          reject(new Error(data.message || 'Private-share seed check failed'));
-        }
-      }
-
-      window.addEventListener('message', handleMessage);
-      timeout = window.setTimeout(() => {
-        window.removeEventListener('message', handleMessage);
-        reject(new Error('Private-share seed check timed out'));
-      }, 15000);
-      window.postMessage(
-        {
-          source: isolatedMessageSource,
-          type: 'seed-status',
-          requestId,
-        },
-        window.location.origin,
-      );
-    },
-  );
-}
-
-// Ask the MAIN world content script to drop any stale capture before the next seed
-async function requestReset() {
-  return await new Promise<void>((resolve, reject) => {
-    const requestId = crypto.randomUUID();
-
-    let timeout = 0;
-
-    function handleMessage(event: MessageEvent) {
-      if (event.source !== window || event.origin !== window.location.origin) {
-        return;
-      }
-
-      const data = event.data as {
-        source?: string;
-        type?: string;
-        requestId?: string;
-      };
-
-      if (
-        data.source !== mainWorldMessageSource ||
-        data.requestId !== requestId ||
-        data.type !== 'reset-result'
-      ) {
-        return;
-      }
-
-      window.clearTimeout(timeout);
-      window.removeEventListener('message', handleMessage);
-      resolve();
-    }
-
-    window.addEventListener('message', handleMessage);
-    timeout = window.setTimeout(() => {
-      window.removeEventListener('message', handleMessage);
-      reject(new Error('Private-share reset timed out'));
-    }, 15000);
-    window.postMessage(
-      {
-        source: isolatedMessageSource,
-        type: 'reset',
-        requestId,
-      },
-      window.location.origin,
-    );
   });
 }
