@@ -1,4 +1,5 @@
 /* eslint-disable no-restricted-syntax -- Content script automation reads and edits YouTube Studio DOM */
+/// <reference types="wxt/vite-builder-env" />
 
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import {
@@ -8,7 +9,8 @@ import {
   getSelectedStudioVideos,
   isOpenPrivateShareDialog,
   isOpenVisibilityPopup,
-} from '../util/youtubeStudio.js';
+} from '../../util/youtubeStudio.js';
+import './style.css';
 
 const buttonId = 'youtube-private-invitations-share-private';
 const statusId = 'youtube-private-invitations-status';
@@ -23,43 +25,6 @@ export default defineContentScript({
 
     // The UI waits for the DOM, which does not exist yet at document_start
     document.addEventListener('DOMContentLoaded', () => {
-      // Studio enforces Trusted Types, so build all extension DOM without HTML sinks like innerHTML
-      const style = document.createElement('style');
-      style.textContent = `
-        #${buttonId} { appearance: none; background: none; border: 0; cursor: pointer; margin: 0; }
-        #${buttonId}:disabled { cursor: wait; opacity: 0.6; }
-        #${statusId} { align-items: start; background-color: var(--ytcp-text-primary, #0f0f0f); border-radius: var(--ytcp-m-border-radius, 2px); bottom: 24px; box-shadow: 0 2px 5px 0 rgba(0, 0, 0, .26); box-sizing: border-box; color: var(--ytcp-text-primary-inverse, #fff); display: grid; font: 400 14px/20px Roboto, Arial, sans-serif; gap: 12px; grid-template-columns: minmax(0, max-content) auto; left: 24px; max-width: calc(100vw - 48px); min-height: 48px; min-width: 288px; padding: 12px 16px; pointer-events: auto; position: fixed; width: fit-content; z-index: 20000; }
-        #${statusId} .youtube-private-invitations-status-content { max-height: 240px; max-width: 560px; min-width: 0; overflow-y: auto; }
-        #${statusId} .youtube-private-invitations-status-title { color: var(--ytcp-text-primary-inverse, #fff); font: 500 14px/20px Roboto, Arial, sans-serif; }
-        #${statusId} .youtube-private-invitations-status-detail { align-items: baseline; color: var(--ytcp-text-primary-inverse, #fff); display: flex; font: 400 13px/18px Roboto, Arial, sans-serif; gap: 6px; margin-top: 2px; min-width: 0; }
-        #${statusId} .youtube-private-invitations-status-detail-label { flex: 0 0 auto; font-weight: 500; }
-        #${statusId} .youtube-private-invitations-status-detail-value { overflow-wrap: anywhere; }
-        #${statusId} ul { list-style: none; margin: 8px 0 0; padding: 0; }
-        #${statusId} li { align-items: flex-start; display: flex; font: 400 13px/18px Roboto, Arial, sans-serif; gap: 6px; }
-        #${statusId} .youtube-private-invitations-status-icon { align-items: center; display: inline-flex; flex: 0 0 auto; height: 18px; }
-        #${statusId} .youtube-private-invitations-status-icon-success { color: #81c995; }
-        #${statusId} .youtube-private-invitations-status-icon-neutral { color: #9aa0a6; }
-        #${statusId} .youtube-private-invitations-status-icon-error { color: #f28b82; }
-        #${statusId} .youtube-private-invitations-status-reload { appearance: none; background: none; border: 0; border-radius: var(--ytcp-m-border-radius, 2px); color: #3ea6ff; cursor: pointer; font: 500 14px/20px Roboto, Arial, sans-serif; margin: -6px -8px 0 0; padding: 6px 8px; text-transform: uppercase; white-space: nowrap; }
-        #${statusId} .youtube-private-invitations-status-reload:hover { background: rgba(62, 166, 255, .1); }
-        .youtube-private-invitations-backdrop { background-color: var(--iron-overlay-backdrop-background-color, #000); inset: 0; opacity: var(--iron-overlay-backdrop-opacity, .6); position: fixed; z-index: 2203; }
-        .youtube-private-invitations-dialog { background: var(--paper-dialog-background-color, var(--primary-background-color, #fff)); border-radius: var(--ytcp-dialog-border-radius, var(--ytcp-xxl-border-radius, 12px)); box-shadow: var(--ytcp-dialog-box-shadow, 0 16px 24px 2px rgba(0, 0, 0, .14), 0 6px 30px 5px rgba(0, 0, 0, .12), 0 8px 10px -5px rgba(0, 0, 0, .4)); box-sizing: border-box; color: var(--paper-dialog-color, var(--primary-text-color, #0f0f0f)); display: flex; flex-direction: column; font-family: Roboto, Noto, sans-serif; left: 50%; max-width: 576px; outline: none; position: fixed; top: 50%; transform: translate(-50%, -50%); width: 576px; z-index: 2204; }
-        .youtube-private-invitations-dialog h1 { color: var(--ytcp-text-primary, #0f0f0f); display: flex; font: 700 20px/28px Roboto, Arial, sans-serif; margin: 12px 16px; padding: 7px 8px 5px; }
-        .youtube-private-invitations-dialog .content { display: flex; flex-direction: column; gap: 12px; min-height: 48px; padding: 0 24px; }
-        .youtube-private-invitations-targets { color: var(--ytcp-text-secondary, #606060); font: 400 14px/20px Roboto, Noto, sans-serif; margin: 0; }
-        .youtube-private-invitations-field { display: flex; flex-direction: column; gap: 4px; margin: 0; }
-        .youtube-private-invitations-field span { color: var(--ytcp-text-secondary, #606060); font: 500 12px/16px Roboto, Noto, sans-serif; }
-        .youtube-private-invitations-dialog textarea { background: var(--paper-dialog-background-color, #fff); border: 1px solid var(--ytcp-line-divider, #d0d0d0); border-radius: var(--ytcp-m-border-radius, 2px); box-sizing: border-box; color: var(--ytcp-text-primary, #0f0f0f); font: 400 16px/24px Roboto, Noto, sans-serif; height: 88px; padding: 12px; resize: vertical; width: 528px; }
-        .youtube-private-invitations-dialog textarea:focus,
-        .youtube-private-invitations-dialog textarea:focus-visible { border-color: var(--paper-dialog-color, var(--primary-text-color, #f1f1f1)); box-shadow: none; outline: none; }
-        .youtube-private-invitations-dialog .footer { display: flex; justify-content: flex-end; padding: 16px 24px 24px; }
-        .youtube-private-invitations-dialog .footer > div { display: flex; gap: 8px; }
-        .youtube-private-invitations-dialog button { border: 0; border-radius: 18px; box-sizing: border-box; cursor: pointer; font: 500 14px/20px Roboto, Arial, sans-serif; height: 36px; min-width: 36px; padding: 0 16px; }
-        .youtube-private-invitations-dialog button[type='button'] { background: rgba(255, 255, 255, .1); color: var(--ytcp-text-primary, #0f0f0f); }
-        .youtube-private-invitations-dialog button[type='submit'] { background: var(--ytcp-text-primary, #0f0f0f); color: var(--ytcp-text-primary-inverse, #fff); }
-      `;
-      document.documentElement.append(style);
-
       addSharePrivatelyAction();
 
       new MutationObserver(addSharePrivatelyAction).observe(document.body, {
