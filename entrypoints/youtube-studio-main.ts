@@ -14,6 +14,15 @@ import {
 const buttonId = 'youtube-private-invitations-share-private';
 const statusId = 'youtube-private-invitations-status';
 
+type VideoInviteeChange = {
+  video: StudioVideo;
+  addedEmails: string[];
+  removedEmails: string[];
+  alreadyInvitedEmails: string[];
+  notInvitedEmails: string[];
+  error?: string;
+};
+
 // Injected into the MAIN world by youtube-studio.content.ts, so fetch/XHR patches hook Studio's own requests
 export default defineUnlistedScript(() => {
   // The XHR and fetch patches must run before Studio's first InnerTube requests
@@ -52,9 +61,7 @@ export default defineUnlistedScript(() => {
           return;
         }
 
-        const appliedVideoIds: string[] = [];
-        const skippedInviteeChanges: string[] = [];
-        const failedInviteeChanges: string[] = [];
+        const videoInviteeChanges: VideoInviteeChange[] = [];
 
         void (async () => {
           try {
@@ -262,15 +269,93 @@ export default defineUnlistedScript(() => {
 
             // Drop any stale capture so the seed check reads this run's write template, not a previous one
             youtubeStudio.resetLastMetadataUpdateCapture();
+            const privateShareVideos =
+              await youtubeStudio.readPrivateShareVideos(
+                selectedVideos.map((selectedVideo) => {
+                  return selectedVideo.videoId;
+                }),
+              );
 
             // Drive the native dialog until one video actually changes, which seeds the API write template
             let seededIndex = -1;
             let seededVideo: (typeof selectedVideos)[number] | undefined;
+            let seededVideoInviteeChange: VideoInviteeChange | undefined;
+            let nativeDialogAttemptCount = 0;
 
             for (const [index, selectedVideo] of selectedVideos.entries()) {
               showStatus(`Applying ${index + 1}/${selectedVideos.length}`);
 
-              if (index > 0) {
+              try {
+                assertStudioVideoRowStillMatchesVideo(
+                  selectedVideo.row,
+                  selectedVideo.videoId,
+                );
+              } catch (error) {
+                throw getStatusError(
+                  error instanceof Error ? error.message : String(error),
+                  getVideoMessage(
+                    'Selected video row changed for',
+                    selectedVideo,
+                  ),
+                );
+              }
+
+              const privateShareVideo =
+                privateShareVideos[selectedVideo.videoId];
+
+              if (!privateShareVideo) {
+                throw getStatusError(
+                  `Could not read current invitees for ${selectedVideo.videoId}`,
+                  getVideoMessage(
+                    'Could not read current invitees for',
+                    selectedVideo,
+                  ),
+                );
+              }
+
+              if (privateShareVideo.privacy !== 'VIDEO_PRIVACY_PRIVATE') {
+                throw getStatusError(
+                  `${selectedVideo.videoId} is not private`,
+                  getVideoMessage('Video is not private:', selectedVideo),
+                );
+              }
+
+              const addEmailsToApply = emailChanges.addEmails.filter(
+                (addEmail) => {
+                  return !privateShareVideo.invitees.some((invitee) => {
+                    return (
+                      invitee.email !== null &&
+                      invitee.email.toLowerCase() === addEmail.toLowerCase()
+                    );
+                  });
+                },
+              );
+              const removeEmailsToApply = emailChanges.removeEmails.filter(
+                (removeEmail) => {
+                  return privateShareVideo.invitees.some((invitee) => {
+                    return (
+                      invitee.email !== null &&
+                      invitee.email.toLowerCase() === removeEmail.toLowerCase()
+                    );
+                  });
+                },
+              );
+
+              if (
+                addEmailsToApply.length === 0 &&
+                removeEmailsToApply.length === 0
+              ) {
+                videoInviteeChanges.push({
+                  video: selectedVideo,
+                  addedEmails: [],
+                  removedEmails: [],
+                  alreadyInvitedEmails: emailChanges.addEmails,
+                  notInvitedEmails: emailChanges.removeEmails,
+                });
+                continue;
+              }
+
+              if (nativeDialogAttemptCount > 0) {
                 await new Promise<void>((resolve) => {
                   window.setTimeout(
                     resolve,
@@ -279,10 +364,7 @@ export default defineUnlistedScript(() => {
                 });
               }
 
-              assertStudioVideoRowStillMatchesVideo(
-                selectedVideo.row,
-                selectedVideo.videoId,
-              );
+              nativeDialogAttemptCount++;
 
               if (
                 Array.from(
@@ -296,29 +378,22 @@ export default defineUnlistedScript(() => {
                 );
               }
 
-              const visibilityControl =
-                selectedVideo.row.querySelector<HTMLElement>(
-                  '.tablecell-visibility .edit-triangle-icon',
-                );
-
-              if (!visibilityControl) {
-                throw new Error(
+              const visibilityControl = await getElement(
+                () =>
+                  selectedVideo.row.querySelector<HTMLElement>(
+                    '.tablecell-visibility .edit-triangle-icon',
+                  ),
+                `visibility control for ${selectedVideo.videoId}`,
+              ).catch(() => {
+                throw getStatusError(
                   `Could not find visibility control for ${selectedVideo.videoId}`,
+                  getVideoMessage(
+                    'Could not find visibility control for',
+                    selectedVideo,
+                  ),
                 );
-              }
+              });
 
-              visibilityControl.dispatchEvent(
-                new PointerEvent('pointerdown', { bubbles: true }),
-              );
-              visibilityControl.dispatchEvent(
-                new MouseEvent('mousedown', { bubbles: true }),
-              );
-              visibilityControl.dispatchEvent(
-                new PointerEvent('pointerup', { bubbles: true }),
-              );
-              visibilityControl.dispatchEvent(
-                new MouseEvent('mouseup', { bubbles: true }),
-              );
               visibilityControl.click();
 
               const visibilityPopup = await getElement(
@@ -329,6 +404,10 @@ export default defineUnlistedScript(() => {
                     ),
                   ).find(isOpenVisibilityPopup),
                 `visibility popup for ${selectedVideo.videoId}`,
+                getVideoMessage(
+                  'Could not find visibility popup for',
+                  selectedVideo,
+                ),
               );
 
               const menuShareButton = await getElement(
@@ -337,6 +416,10 @@ export default defineUnlistedScript(() => {
                     'ytcp-button.private-share-edit-button button',
                   ),
                 `private-share button for ${selectedVideo.videoId}`,
+                getVideoMessage(
+                  'Could not find private-share button for',
+                  selectedVideo,
+                ),
               );
 
               menuShareButton.click();
@@ -348,10 +431,20 @@ export default defineUnlistedScript(() => {
                       'ytcp-dialog.ytcp-private-video-sharing-dialog',
                     ),
                   ).find(isOpenPrivateShareDialog),
-                'YouTube private-share dialog',
+                `YouTube private-share dialog for ${selectedVideo.videoId}`,
+                getVideoMessage(
+                  'Could not find YouTube private-share dialog for',
+                  selectedVideo,
+                ),
               );
 
-              let videoChanged = false;
+              const videoInviteeChange: VideoInviteeChange = {
+                video: selectedVideo,
+                addedEmails: [],
+                removedEmails: [],
+                alreadyInvitedEmails: [],
+                notInvitedEmails: [],
+              };
 
               if (emailChanges.addEmails.length > 0) {
                 const input = await getElement(
@@ -359,7 +452,11 @@ export default defineUnlistedScript(() => {
                     nextDialog.querySelector<HTMLInputElement>(
                       '#text-input[aria-label="Invitees"]',
                     ),
-                  'private-share email input',
+                  `private-share email input for ${selectedVideo.videoId}`,
+                  getVideoMessage(
+                    'Could not find private-share email input for',
+                    selectedVideo,
+                  ),
                 );
                 const inputValueDescriptor = Object.getOwnPropertyDescriptor(
                   Object.getPrototypeOf(input),
@@ -367,16 +464,18 @@ export default defineUnlistedScript(() => {
                 );
 
                 if (!inputValueDescriptor || !inputValueDescriptor.set) {
-                  throw new Error(
-                    'Could not set the private-share email input value',
+                  throw getStatusError(
+                    `Could not set the private-share email input value for ${selectedVideo.videoId}`,
+                    getVideoMessage(
+                      'Could not set the private-share email input value for',
+                      selectedVideo,
+                    ),
                   );
                 }
 
                 for (const addEmail of emailChanges.addEmails) {
                   if (findInviteeChip(nextDialog, addEmail)) {
-                    skippedInviteeChanges.push(
-                      `${addEmail} already invited for ${selectedVideo.videoId}`,
-                    );
+                    videoInviteeChange.alreadyInvitedEmails.push(addEmail);
                     continue;
                   }
 
@@ -404,9 +503,13 @@ export default defineUnlistedScript(() => {
                   );
                   await getElement(
                     () => findInviteeChip(nextDialog, addEmail),
-                    `private-share chip for ${addEmail}`,
+                    `private-share chip for ${addEmail} in ${selectedVideo.videoId}`,
+                    getVideoMessage(
+                      `Could not find private-share chip for ${addEmail} in`,
+                      selectedVideo,
+                    ),
                   );
-                  videoChanged = true;
+                  videoInviteeChange.addedEmails.push(addEmail);
                 }
               }
 
@@ -414,9 +517,7 @@ export default defineUnlistedScript(() => {
                 const chip = findInviteeChip(nextDialog, removeEmail);
 
                 if (!chip) {
-                  skippedInviteeChanges.push(
-                    `${removeEmail} was not invited for ${selectedVideo.videoId}`,
-                  );
+                  videoInviteeChange.notInvitedEmails.push(removeEmail);
                   continue;
                 }
 
@@ -424,7 +525,13 @@ export default defineUnlistedScript(() => {
                   chip.querySelector<HTMLElement>('#delete-icon');
 
                 if (!deleteButton) {
-                  throw new Error(`Could not remove ${removeEmail}`);
+                  throw getStatusError(
+                    `Could not remove ${removeEmail} from ${selectedVideo.videoId}`,
+                    getVideoMessage(
+                      `Could not remove ${removeEmail} from`,
+                      selectedVideo,
+                    ),
+                  );
                 }
 
                 deleteButton.click();
@@ -435,18 +542,29 @@ export default defineUnlistedScript(() => {
                     findInviteeChip(nextDialog, removeEmail)
                       ? null
                       : nextDialog,
-                  `removed chip for ${removeEmail}`,
+                  `removed chip for ${removeEmail} in ${selectedVideo.videoId}`,
+                  getVideoMessage(
+                    `Could not remove ${removeEmail} from`,
+                    selectedVideo,
+                  ),
                 );
-                videoChanged = true;
+                videoInviteeChange.removedEmails.push(removeEmail);
               }
 
-              if (!videoChanged) {
+              if (
+                videoInviteeChange.addedEmails.length === 0 &&
+                videoInviteeChange.removedEmails.length === 0
+              ) {
                 const shareCancelButton = await getElement(
                   () =>
                     nextDialog.querySelector<HTMLElement>(
                       '#cancel-button button[aria-label="Cancel"]',
                     ),
                   `private-share Cancel button for ${selectedVideo.videoId}`,
+                  getVideoMessage(
+                    'Could not find private-share Cancel button for',
+                    selectedVideo,
+                  ),
                 );
 
                 shareCancelButton.click();
@@ -458,6 +576,10 @@ export default defineUnlistedScript(() => {
                       ? null
                       : nextDialog,
                   `closed private-share dialog for ${selectedVideo.videoId}`,
+                  getVideoMessage(
+                    'Could not close private-share dialog for',
+                    selectedVideo,
+                  ),
                   10000,
                 );
 
@@ -467,6 +589,10 @@ export default defineUnlistedScript(() => {
                       'ytcp-button#cancel-button button[aria-label="Cancel"]',
                     ),
                   `visibility popup Cancel button for ${selectedVideo.videoId}`,
+                  getVideoMessage(
+                    'Could not find visibility popup Cancel button for',
+                    selectedVideo,
+                  ),
                 );
 
                 popupCancelButton.click();
@@ -478,7 +604,12 @@ export default defineUnlistedScript(() => {
                       ? null
                       : visibilityPopup,
                   `closed visibility popup for ${selectedVideo.videoId}`,
+                  getVideoMessage(
+                    'Could not close visibility popup for',
+                    selectedVideo,
+                  ),
                 );
+                videoInviteeChanges.push(videoInviteeChange);
                 continue;
               }
 
@@ -487,7 +618,13 @@ export default defineUnlistedScript(() => {
               );
 
               if (!notifyCheckbox) {
-                throw new Error('Could not find the Notify via email checkbox');
+                throw getStatusError(
+                  `Could not find the Notify via email checkbox for ${selectedVideo.videoId}`,
+                  getVideoMessage(
+                    'Could not find the Notify via email checkbox for',
+                    selectedVideo,
+                  ),
+                );
               }
 
               if (notifyCheckbox.getAttribute('aria-checked') !== 'false') {
@@ -501,12 +638,22 @@ export default defineUnlistedScript(() => {
               );
 
               if (!doneButton) {
-                throw new Error('Could not find the private-share Done button');
+                throw getStatusError(
+                  `Could not find the private-share Done button for ${selectedVideo.videoId}`,
+                  getVideoMessage(
+                    'Could not find the private-share Done button for',
+                    selectedVideo,
+                  ),
+                );
               }
 
               if (doneButton.getAttribute('aria-disabled') === 'true') {
-                throw new Error(
+                throw getStatusError(
                   `Private-share Done button is disabled for ${selectedVideo.videoId}`,
+                  getVideoMessage(
+                    'Private-share Done button is disabled for',
+                    selectedVideo,
+                  ),
                 );
               }
 
@@ -518,20 +665,31 @@ export default defineUnlistedScript(() => {
                     ? null
                     : nextDialog,
                 `closed private-share dialog for ${selectedVideo.videoId}`,
+                getVideoMessage(
+                  'Could not close private-share dialog for',
+                  selectedVideo,
+                ),
                 10000,
               );
 
               // Done only stages invitee changes - the visibility popup Save persists them
-              const saveButton = await getElement(() => {
-                const element = visibilityPopup.querySelector<HTMLElement>(
-                  'ytcp-button#save-button button',
-                );
+              const saveButton = await getElement(
+                () => {
+                  const element = visibilityPopup.querySelector<HTMLElement>(
+                    'ytcp-button#save-button button',
+                  );
 
-                return element &&
-                  element.getAttribute('aria-disabled') !== 'true'
-                  ? element
-                  : null;
-              }, `enabled visibility popup Save button for ${selectedVideo.videoId}`);
+                  return element &&
+                    element.getAttribute('aria-disabled') !== 'true'
+                    ? element
+                    : null;
+                },
+                `enabled visibility popup Save button for ${selectedVideo.videoId}`,
+                getVideoMessage(
+                  'Could not find enabled visibility popup Save button for',
+                  selectedVideo,
+                ),
+              );
 
               saveButton.click();
 
@@ -542,27 +700,40 @@ export default defineUnlistedScript(() => {
                     ? null
                     : visibilityPopup,
                 `closed visibility popup for ${selectedVideo.videoId}`,
+                getVideoMessage(
+                  'Could not close visibility popup for',
+                  selectedVideo,
+                ),
               );
               // The seed's success is verified against its captured response, not the DOM
               seededIndex = index;
               seededVideo = selectedVideo;
+              seededVideoInviteeChange = videoInviteeChange;
               break;
             }
 
             if (seededVideo) {
-              const seedVideoId = seededVideo.videoId;
               const seedStatus =
                 await youtubeStudio.getMetadataUpdateStatus();
 
               if (!seedStatus.ok) {
                 // The native Save was rejected server-side, so stop instead of replaying the same invalid data
-                failedInviteeChanges.push(
-                  `Update failed for ${seedVideoId}${
+                videoInviteeChanges.push({
+                  video: seededVideo,
+                  addedEmails: [],
+                  removedEmails: [],
+                  alreadyInvitedEmails: [],
+                  notInvitedEmails: [],
+                  error: `Update failed${
                     seedStatus.resultCode ? ` (${seedStatus.resultCode})` : ''
                   }`,
-                );
+                });
               } else {
-                appliedVideoIds.push(seedVideoId);
+                if (!seededVideoInviteeChange) {
+                  throw new Error('Could not find seeded video invitee change');
+                }
+
+                videoInviteeChanges.push(seededVideoInviteeChange);
 
                 const remainingVideoIds = selectedVideos
                   .slice(seededIndex + 1)
@@ -571,89 +742,83 @@ export default defineUnlistedScript(() => {
                 if (remainingVideoIds.length > 0) {
                   showStatus(
                     `Applying ${remainingVideoIds.length} more videos`,
+                    false,
+                    0,
                   );
 
                   const results = await youtubeStudio.applyInvitees({
                     videoIds: remainingVideoIds,
                     addEmails: emailChanges.addEmails,
                     removeEmails: emailChanges.removeEmails,
+                    onProgress(processedVideoCount) {
+                      showStatus(
+                        `Applying ${seededIndex + 1 + processedVideoCount}/${selectedVideos.length}`,
+                        false,
+                        0,
+                      );
+                    },
                   });
 
                   for (const result of results) {
-                    if (result.error) {
-                      failedInviteeChanges.push(result.error);
-                    } else if (result.skipped) {
-                      skippedInviteeChanges.push(
-                        `No change needed for ${result.videoId}`,
+                    const resultVideo = selectedVideos.find((selectedVideo) => {
+                      return selectedVideo.videoId === result.videoId;
+                    });
+
+                    if (!resultVideo) {
+                      throw new Error(
+                        `Could not find selected video for ${result.videoId}`,
                       );
-                    } else {
-                      appliedVideoIds.push(result.videoId);
                     }
+
+                    videoInviteeChanges.push({
+                      video: resultVideo,
+                      addedEmails: result.addedEmails,
+                      removedEmails: result.removedEmails,
+                      alreadyInvitedEmails: result.alreadyInvitedEmails,
+                      notInvitedEmails: result.notInvitedEmails,
+                      error: result.error,
+                    });
                   }
                 }
               }
             }
 
+            const changedVideoCount = videoInviteeChanges.filter(
+              (videoInviteeChange) => {
+                return (
+                  videoInviteeChange.addedEmails.length > 0 ||
+                  videoInviteeChange.removedEmails.length > 0
+                );
+              },
+            ).length;
+            const failedVideoCount = videoInviteeChanges.filter(
+              (videoInviteeChange) => {
+                return videoInviteeChange.error !== undefined;
+              },
+            ).length;
             const statusMessage = getStatusMessage(
-              failedInviteeChanges.length > 0
-                ? appliedVideoIds.length > 0
-                  ? `Applied ${appliedVideoIds.length}, then stopped on a failure`
+              failedVideoCount > 0
+                ? changedVideoCount > 0
+                  ? `Applied changes to ${changedVideoCount} videos, then stopped on a failure`
                   : 'Stopped on a failure'
-                : appliedVideoIds.length > 0
-                  ? `Applied changes to ${appliedVideoIds.length} videos`
+                : changedVideoCount > 0
+                  ? `Applied changes to ${changedVideoCount} videos`
                   : 'No changes needed',
             );
 
-            if (emailChanges.addEmails.length > 0) {
-              appendStatusDetail(
-                statusMessage,
-                'Add',
-                emailChanges.addEmails.join(', '),
-              );
-            }
-
-            if (emailChanges.removeEmails.length > 0) {
-              appendStatusDetail(
-                statusMessage,
-                'Remove',
-                emailChanges.removeEmails.join(', '),
-              );
-            }
-
-            const statusList = document.createElement('ul');
-
-            for (const videoId of appliedVideoIds) {
-              appendStatusOutcome(statusList, 'success', `Applied ${videoId}`);
-            }
-
-            for (const failedInviteeChange of failedInviteeChanges) {
-              appendStatusOutcome(statusList, 'error', failedInviteeChange);
-            }
-
-            for (const skippedInviteeChange of skippedInviteeChanges) {
-              appendStatusOutcome(statusList, 'neutral', skippedInviteeChange);
-            }
-
-            if (statusList.children.length > 0) {
-              statusMessage.append(statusList);
-            }
+            statusMessage.append(getVideoInviteeChangeList(videoInviteeChanges));
             showStatus(statusMessage, true);
           } finally {
             button.disabled = false;
           }
         })().catch((error: unknown) => {
           console.error(error);
-          const statusMessage = getStatusMessage(
-            error instanceof Error ? error.message : String(error),
-          );
-          const statusList = document.createElement('ul');
+          const statusMessage = getStatusMessage(getErrorStatusMessage(error));
 
-          for (const videoId of appliedVideoIds) {
-            appendStatusOutcome(statusList, 'success', `Applied ${videoId}`);
-          }
-
-          if (statusList.children.length > 0) {
-            statusMessage.append(statusList);
+          if (videoInviteeChanges.length > 0) {
+            statusMessage.append(
+              getVideoInviteeChangeList(videoInviteeChanges),
+            );
           }
           showStatus(statusMessage, true);
         });
@@ -663,17 +828,44 @@ export default defineUnlistedScript(() => {
 
 const statusIconPaths: Record<'error' | 'neutral' | 'success', string> = {
   success: 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
-  neutral: 'M19 13H5v-2h14z',
+  neutral:
+    'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 2c1.85 0 3.55.63 4.9 1.69L5.69 16.9C4.63 15.55 4 13.85 4 12c0-4.42 3.58-8 8-8zm0 16c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1C19.37 8.45 20 10.15 20 12c0 4.42-3.58 8-8 8z',
   error:
     'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
 };
 
-function getStatusMessage(message: string) {
+const statusIconLabels: Record<'error' | 'neutral' | 'success', string> = {
+  success: 'Applied',
+  neutral: 'Skipped',
+  error: 'Error',
+};
+
+function getErrorStatusMessage(error: unknown) {
+  if (error instanceof Error && 'statusMessage' in error) {
+    const statusMessage = error.statusMessage;
+
+    if (typeof statusMessage === 'string' || statusMessage instanceof Node) {
+      return statusMessage;
+    }
+  }
+
+  return error instanceof Error ? error.message : String(error);
+}
+
+function getStatusError(message: string, statusMessage: string | Node) {
+  const error = new Error(message) as Error & { statusMessage: string | Node };
+
+  error.statusMessage = statusMessage;
+
+  return error;
+}
+
+function getStatusMessage(message: string | Node) {
   const fragment = document.createDocumentFragment();
   const title = document.createElement('div');
 
   title.className = 'youtube-private-invitations-status-title';
-  title.textContent = message;
+  title.append(message);
   fragment.append(title);
 
   return fragment;
@@ -707,6 +899,51 @@ function getVideoList(videos: StudioVideo[]) {
   return getVideoListContainer(list, videos.length);
 }
 
+function getVideoInviteeChangeList(videoInviteeChanges: VideoInviteeChange[]) {
+  const list = document.createElement('ul');
+
+  list.className =
+    'youtube-private-invitations-video-list youtube-private-invitations-video-change-list';
+
+  for (const videoInviteeChange of videoInviteeChanges) {
+    const listItem = document.createElement('li');
+
+    listItem.append(getVideoLink(videoInviteeChange.video));
+    appendVideoInviteeChangeDetail(
+      listItem,
+      'Added',
+      videoInviteeChange.addedEmails,
+      videoInviteeChange.alreadyInvitedEmails,
+      'Already invited',
+    );
+    appendVideoInviteeChangeDetail(
+      listItem,
+      'Removed',
+      videoInviteeChange.removedEmails,
+      videoInviteeChange.notInvitedEmails,
+      'Not invited',
+    );
+
+    if (videoInviteeChange.error) {
+      const error = document.createElement('div');
+      const label = document.createElement('span');
+      const text = document.createElement('span');
+
+      error.className =
+        'youtube-private-invitations-video-change-detail youtube-private-invitations-video-change-detail-error';
+      label.className = 'youtube-private-invitations-video-change-label';
+      label.textContent = 'Error';
+      text.textContent = videoInviteeChange.error;
+      error.append(label, text);
+      listItem.append(error);
+    }
+
+    list.append(listItem);
+  }
+
+  return getVideoListContainer(list, videoInviteeChanges.length);
+}
+
 function getVideoListContainer(list: HTMLUListElement, videoCount: number) {
   if (videoCount <= 5) {
     const container = document.createElement('div');
@@ -732,6 +969,56 @@ function getVideoListContainer(list: HTMLUListElement, videoCount: number) {
   });
 
   return details;
+}
+
+function appendVideoInviteeChangeDetail(
+  listItem: HTMLLIElement,
+  labelText: string,
+  emails: string[],
+  skippedEmails: string[],
+  skippedStatusText: string,
+) {
+  if (emails.length === 0 && skippedEmails.length === 0) {
+    return;
+  }
+
+  const detail = document.createElement('div');
+  const label = document.createElement('span');
+
+  detail.className = 'youtube-private-invitations-video-change-detail';
+  label.className = 'youtube-private-invitations-video-change-label';
+  label.textContent = labelText;
+  detail.append(label);
+
+  for (const email of emails) {
+    const changed = document.createElement('span');
+
+    changed.className = 'youtube-private-invitations-video-change-email';
+    changed.append(
+      getInlineStatusIcon('success', statusIconLabels.success, {
+        tooltip: false,
+      }),
+      email,
+    );
+    detail.append(changed);
+  }
+
+  for (const skippedEmail of skippedEmails) {
+    const skipped = document.createElement('span');
+
+    skipped.className =
+      'youtube-private-invitations-video-change-email youtube-private-invitations-video-change-skipped';
+    addTooltip(skipped, skippedStatusText);
+    skipped.append(
+      getInlineStatusIcon('neutral', skippedStatusText, {
+        tooltip: false,
+      }),
+      skippedEmail,
+    );
+    detail.append(skipped);
+  }
+
+  listItem.append(detail);
 }
 
 function setVideoListScrollState(container: HTMLElement, list: HTMLElement) {
@@ -768,29 +1055,46 @@ function getChevronIcon() {
   return svg;
 }
 
-function appendStatusDetail(parent: DocumentFragment, label: string, value: string) {
-  const detail = document.createElement('div');
-  const labelElement = document.createElement('span');
-  const valueElement = document.createElement('span');
+function getVideoMessage(message: string, video: StudioVideo, detail = '') {
+  const fragment = document.createDocumentFragment();
 
-  detail.className = 'youtube-private-invitations-status-detail';
-  labelElement.className = 'youtube-private-invitations-status-detail-label';
-  labelElement.textContent = label;
-  valueElement.className = 'youtube-private-invitations-status-detail-value';
-  valueElement.textContent = value;
-  detail.append(labelElement, valueElement);
-  parent.append(detail);
+  fragment.append(`${message} `, getVideoLink(video));
+
+  if (detail) {
+    fragment.append(`: ${detail}`);
+  }
+
+  return fragment;
 }
 
 function appendStatusOutcome(
   list: HTMLUListElement,
   status: 'error' | 'neutral' | 'success',
-  text: string,
+  message: Node | string,
 ) {
   const listItem = document.createElement('li');
 
+  const textElement = document.createElement('span');
+  listItem.append(getInlineStatusIcon(status));
+  textElement.append(message);
+  listItem.append(textElement);
+
+  list.append(listItem);
+}
+
+function getInlineStatusIcon(
+  status: 'error' | 'neutral' | 'success',
+  label = statusIconLabels[status],
+  options = { tooltip: true },
+) {
   const icon = document.createElement('span');
   icon.className = `youtube-private-invitations-status-icon youtube-private-invitations-status-icon-${status}`;
+
+  if (options.tooltip) {
+    icon.setAttribute('aria-label', label);
+    icon.setAttribute('role', 'img');
+    addTooltip(icon, label);
+  }
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
@@ -802,16 +1106,48 @@ function appendStatusOutcome(
   path.setAttribute('d', statusIconPaths[status]);
   svg.append(path);
   icon.append(svg);
-  listItem.append(icon);
 
-  const textElement = document.createElement('span');
-  textElement.textContent = text;
-  listItem.append(textElement);
-
-  list.append(listItem);
+  return icon;
 }
 
-function showStatus(message: string | Node, sticky = false) {
+function addTooltip(anchor: HTMLElement, text: string) {
+  anchor.addEventListener('mouseenter', () => {
+    showTooltip(anchor, text);
+  });
+  anchor.addEventListener('focus', () => {
+    showTooltip(anchor, text);
+  });
+  anchor.addEventListener('mouseleave', removeTooltip);
+  anchor.addEventListener('blur', removeTooltip);
+}
+
+function showTooltip(anchor: HTMLElement, text: string) {
+  removeTooltip();
+
+  const tooltip = document.createElement('div');
+  const anchorRect = anchor.getBoundingClientRect();
+
+  tooltip.id = 'youtube-private-invitations-tooltip';
+  tooltip.className = 'youtube-private-invitations-tooltip';
+  tooltip.textContent = text;
+  tooltip.style.left = `${anchorRect.left + anchorRect.width / 2}px`;
+  tooltip.style.top = `${anchorRect.top - 8}px`;
+  document.documentElement.append(tooltip);
+}
+
+function removeTooltip() {
+  const tooltip = document.getElementById('youtube-private-invitations-tooltip');
+
+  if (tooltip) {
+    tooltip.remove();
+  }
+}
+
+function showStatus(
+  message: string | Node,
+  sticky = false,
+  timeoutMilliseconds = 6000,
+) {
   const status = document.getElementById(statusId);
 
   if (status) {
@@ -841,18 +1177,21 @@ function showStatus(message: string | Node, sticky = false) {
     return;
   }
 
-  window.setTimeout(() => {
-    const currentStatus = document.getElementById(statusId);
+  if (timeoutMilliseconds > 0) {
+    window.setTimeout(() => {
+      const currentStatus = document.getElementById(statusId);
 
-    if (currentStatus && currentStatus.textContent === newStatus.textContent) {
-      currentStatus.remove();
-    }
-  }, 6000);
+      if (currentStatus && currentStatus.textContent === newStatus.textContent) {
+        currentStatus.remove();
+      }
+    }, timeoutMilliseconds);
+  }
 }
 
 async function getElement<ElementType extends Element>(
   findElement: () => ElementType | null | undefined,
   description: string,
+  statusMessage?: string | Node,
   timeoutMilliseconds = 5000,
 ) {
   return await new Promise<ElementType>((resolve, reject) => {
@@ -876,7 +1215,11 @@ async function getElement<ElementType extends Element>(
 
     timeout = window.setTimeout(() => {
       observer.disconnect();
-      reject(new Error(`Could not find ${description}`));
+      reject(
+        statusMessage
+          ? getStatusError(`Could not find ${description}`, statusMessage)
+          : new Error(`Could not find ${description}`),
+      );
     }, timeoutMilliseconds);
     observer.observe(document.body, {
       attributes: true,

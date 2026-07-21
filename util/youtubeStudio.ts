@@ -586,9 +586,10 @@ export function initYoutubeStudio() {
 
   type ApplyResult = {
     videoId: string;
-    added: string[];
-    removed: string[];
-    skipped: boolean;
+    addedEmails: string[];
+    removedEmails: string[];
+    alreadyInvitedEmails: string[];
+    notInvitedEmails: string[];
     error?: string;
   };
 
@@ -597,6 +598,7 @@ export function initYoutubeStudio() {
     videoIds: string[];
     addEmails: string[];
     removeEmails: string[];
+    onProgress: (processedVideoCount: number) => void;
   }) {
     try {
       const map = await readPrivateShareVideos(target.videoIds);
@@ -608,23 +610,33 @@ export function initYoutubeStudio() {
       const results: ApplyResult[] = [];
 
       for (const [index, videoId] of target.videoIds.entries()) {
+        target.onProgress(index + 1);
+
         // Record each video's outcome, then stop on the first failure instead of throwing
         try {
           const video = map[videoId];
 
           if (!video) {
-            throw new Error(`Could not read current invitees for ${videoId}`);
+            throw new Error('Could not read current invitees');
           }
 
           // Private-share invitees only exist on private videos, so refuse anything else
           if (video.privacy !== 'VIDEO_PRIVACY_PRIVATE') {
-            throw new Error(`${videoId} is not private`);
+            throw new Error('Video is not private');
           }
 
           const invitees = video.invitees;
 
-          const addEmails = target.addEmails.filter((addEmail) => {
+          const addedEmails = target.addEmails.filter((addEmail) => {
             return !invitees.some((invitee) => {
+              return (
+                invitee.email !== null &&
+                invitee.email.toLowerCase() === addEmail.toLowerCase()
+              );
+            });
+          });
+          const alreadyInvitedEmails = target.addEmails.filter((addEmail) => {
+            return invitees.some((invitee) => {
               return (
                 invitee.email !== null &&
                 invitee.email.toLowerCase() === addEmail.toLowerCase()
@@ -636,6 +648,7 @@ export function initYoutubeStudio() {
           const deletedOgids: string[] = [];
           const deletedEmails: string[] = [];
           const removedEmails: string[] = [];
+          const notInvitedEmails: string[] = [];
 
           for (const removeEmail of target.removeEmails) {
             const invitee = invitees.find((candidate) => {
@@ -646,6 +659,7 @@ export function initYoutubeStudio() {
             });
 
             if (!invitee) {
+              notInvitedEmails.push(removeEmail);
               continue;
             }
 
@@ -659,11 +673,17 @@ export function initYoutubeStudio() {
           }
 
           if (
-            addEmails.length === 0 &&
+            addedEmails.length === 0 &&
             deletedOgids.length === 0 &&
             deletedEmails.length === 0
           ) {
-            results.push({ videoId, added: [], removed: [], skipped: true });
+            results.push({
+              videoId,
+              addedEmails: [],
+              removedEmails: [],
+              alreadyInvitedEmails,
+              notInvitedEmails,
+            });
             continue;
           }
 
@@ -678,7 +698,8 @@ export function initYoutubeStudio() {
 
           const { body } = await replayMetadataUpdate({
             videoId,
-            shareEmails: addEmails.length > 0 ? addEmails.join(',') : undefined,
+            shareEmails:
+              addedEmails.length > 0 ? addedEmails.join(',') : undefined,
             deletedOgids:
               deletedOgids.length > 0 ? deletedOgids.join(',') : undefined,
             deletedEmails:
@@ -697,7 +718,7 @@ export function initYoutubeStudio() {
             privateShare.success !== true
           ) {
             throw new Error(
-              `Update failed for ${videoId} (${overallResult ? overallResult.resultCode : 'no resultCode'}, privateShare success: ${privateShare ? String(privateShare.success) : 'missing'})`,
+              `Update failed (${overallResult ? overallResult.resultCode : 'no resultCode'}, privateShare success: ${privateShare ? String(privateShare.success) : 'missing'})`,
             );
           }
 
@@ -723,7 +744,7 @@ export function initYoutubeStudio() {
               .filter((email) => email !== undefined),
           );
 
-          const failedAdds = addEmails.filter((addEmail) => {
+          const failedAdds = addedEmails.filter((addEmail) => {
             return !resultingEmails.has(addEmail.toLowerCase());
           });
           const failedRemoves = removedEmails.filter((removeEmail) => {
@@ -732,7 +753,7 @@ export function initYoutubeStudio() {
 
           if (failedAdds.length > 0 || failedRemoves.length > 0) {
             throw new Error(
-              `Update failed for ${videoId} (${overallResult.resultCode})${
+              `Update failed (${overallResult.resultCode})${
                 failedAdds.length > 0
                   ? ` - could not add: ${failedAdds.join(', ')}`
                   : ''
@@ -746,16 +767,18 @@ export function initYoutubeStudio() {
 
           results.push({
             videoId,
-            added: addEmails,
-            removed: removedEmails,
-            skipped: false,
+            addedEmails,
+            removedEmails,
+            alreadyInvitedEmails,
+            notInvitedEmails,
           });
         } catch (error) {
           results.push({
             videoId,
-            added: [],
-            removed: [],
-            skipped: false,
+            addedEmails: [],
+            removedEmails: [],
+            alreadyInvitedEmails: [],
+            notInvitedEmails: [],
             error: error instanceof Error ? error.message : String(error),
           });
           // Stop on the first failure so we do not keep hammering with invalid data
@@ -773,6 +796,7 @@ export function initYoutubeStudio() {
   return {
     applyInvitees,
     getMetadataUpdateStatus,
+    readPrivateShareVideos,
     resetLastMetadataUpdateCapture() {
       lastMetadataUpdateCapture = null;
     },
