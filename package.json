@@ -21,25 +21,25 @@
     "zip": "wxt zip"
   },
   "dependencies": {
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@types/chrome": "^0.2.2",
+    "@types/chrome": "0.2.2",
     "@types/node": "26.1.0",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@wxt-dev/module-react": "^1.2.2",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@wxt-dev/module-react": "1.2.2",
     "eslint": "10.6.0",
     "eslint-config-upleveled": "10.0.0",
     "prettier": "3.9.4",
     "typescript": "6.0.3",
-    "wxt": "^0.20.27"
+    "wxt": "0.20.27"
   },
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
-      "version": "11.11.0+sha512.4463f65fd80ed80d69bc1d4bf163ee94f605c7380fc318bb5b2ebe15f8cd12d49c51a4d59e951b401e764d3b6ca751cbf51bc50ed7001a6bcb4935e684c34882",
+      "version": "11.15.1+sha512.81350b07e53c9538a02f1f2303b4290fa2d7be04e56e2a970c4cc4b417dc761de196edabd49d55c7dc9580db81007c44143e4e3d7e462b3000d23c255122d065",
       "onFail": "download"
     }
   }
