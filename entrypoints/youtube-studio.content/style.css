@@ -14,10 +14,30 @@
 #youtube-private-invitations-status .youtube-private-invitations-status-icon-error { color: #f28b82; }
 #youtube-private-invitations-status .youtube-private-invitations-status-reload { appearance: none; background: none; border: 0; border-radius: var(--ytcp-m-border-radius, 2px); color: #3ea6ff; cursor: pointer; font: 500 14px/20px Roboto, Arial, sans-serif; margin: -6px -8px 0 0; padding: 6px 8px; text-transform: uppercase; white-space: nowrap; }
 #youtube-private-invitations-status .youtube-private-invitations-status-reload:hover { background: rgba(62, 166, 255, .1); }
+.youtube-private-invitations-video-link { border-radius: 999px; color: inherit; display: inline-block; font-weight: 500; outline: none; padding: 2px 8px; text-decoration: none; }
+.youtube-private-invitations-video-link:hover { background: rgba(255, 255, 255, .1); }
+.youtube-private-invitations-video-link:focus-visible { background: rgba(255, 255, 255, .1); outline: 1px solid currentColor; outline-offset: 2px; }
+.youtube-private-invitations-video-list-container,
+.youtube-private-invitations-video-details { margin-top: 8px; }
+.youtube-private-invitations-video-list { display: flex; flex-direction: column; gap: 6px; list-style: none; list-style-type: none; margin: 0; max-height: min(180px, 32vh); overflow-y: auto; padding: 0 0 4px; }
+.youtube-private-invitations-video-list li { display: block; font: 400 13px/18px Roboto, Arial, sans-serif; list-style: none; list-style-type: none; overflow-wrap: anywhere; }
+.youtube-private-invitations-video-list li::marker { content: ''; }
+.youtube-private-invitations-video-list-container,
+.youtube-private-invitations-video-details[open] { position: relative; }
+.youtube-private-invitations-video-list-container[data-scroll-up='true']::before,
+.youtube-private-invitations-video-details[open][data-scroll-up='true']::before { background: linear-gradient(var(--paper-dialog-background-color, var(--primary-background-color, #fff)), transparent); content: ''; height: 24px; left: 0; pointer-events: none; position: absolute; right: 0; top: 0; z-index: 1; }
+.youtube-private-invitations-video-details[open][data-scroll-up='true']::before { top: 18px; }
+.youtube-private-invitations-video-list-container[data-scroll-down='true']::after,
+.youtube-private-invitations-video-details[open][data-scroll-down='true']::after { background: linear-gradient(transparent, var(--paper-dialog-background-color, var(--primary-background-color, #fff))); bottom: 0; content: ''; height: 24px; left: 0; pointer-events: none; position: absolute; right: 0; z-index: 1; }
+.youtube-private-invitations-video-details summary { align-items: center; cursor: pointer; display: flex; font: 500 13px/18px Roboto, Arial, sans-serif; gap: 4px; list-style: none; }
+.youtube-private-invitations-video-details summary::marker { content: ''; }
+.youtube-private-invitations-video-details summary::-webkit-details-marker { display: none; }
+.youtube-private-invitations-chevron { align-self: center; display: block; flex: 0 0 auto; transition: transform .15s; }
+.youtube-private-invitations-video-details[open] .youtube-private-invitations-chevron { transform: rotate(180deg); }
 .youtube-private-invitations-backdrop { background-color: var(--iron-overlay-backdrop-background-color, #000); inset: 0; opacity: var(--iron-overlay-backdrop-opacity, .6); position: fixed; z-index: 2203; }
-.youtube-private-invitations-dialog { background: var(--paper-dialog-background-color, var(--primary-background-color, #fff)); border-radius: var(--ytcp-dialog-border-radius, var(--ytcp-xxl-border-radius, 12px)); box-shadow: var(--ytcp-dialog-box-shadow, 0 16px 24px 2px rgba(0, 0, 0, .14), 0 6px 30px 5px rgba(0, 0, 0, .12), 0 8px 10px -5px rgba(0, 0, 0, .4)); box-sizing: border-box; color: var(--paper-dialog-color, var(--primary-text-color, #0f0f0f)); display: flex; flex-direction: column; font-family: Roboto, Noto, sans-serif; left: 50%; max-width: 576px; outline: none; position: fixed; top: 50%; transform: translate(-50%, -50%); width: 576px; z-index: 2204; }
+.youtube-private-invitations-dialog { background: var(--paper-dialog-background-color, var(--primary-background-color, #fff)); border-radius: var(--ytcp-dialog-border-radius, var(--ytcp-xxl-border-radius, 12px)); box-shadow: var(--ytcp-dialog-box-shadow, 0 16px 24px 2px rgba(0, 0, 0, .14), 0 6px 30px 5px rgba(0, 0, 0, .12), 0 8px 10px -5px rgba(0, 0, 0, .4)); box-sizing: border-box; color: var(--paper-dialog-color, var(--primary-text-color, #0f0f0f)); display: flex; flex-direction: column; font-family: Roboto, Noto, sans-serif; left: 50%; max-height: calc(100vh - 48px); max-width: 576px; outline: none; position: fixed; top: 50%; transform: translate(-50%, -50%); width: 576px; z-index: 2204; }
 .youtube-private-invitations-dialog h1 { color: var(--ytcp-text-primary, #0f0f0f); display: flex; font: 700 20px/28px Roboto, Arial, sans-serif; margin: 12px 16px; padding: 7px 8px 5px; }
-.youtube-private-invitations-dialog .content { display: flex; flex-direction: column; gap: 12px; min-height: 48px; padding: 0 24px; }
+.youtube-private-invitations-dialog .content { display: flex; flex: 1 1 auto; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; padding: 0 24px; }
 .youtube-private-invitations-targets { color: var(--ytcp-text-secondary, #606060); font: 400 14px/20px Roboto, Noto, sans-serif; margin: 0; }
 .youtube-private-invitations-field { display: flex; flex-direction: column; gap: 4px; margin: 0; }
 .youtube-private-invitations-field span { color: var(--ytcp-text-secondary, #606060); font: 500 12px/16px Roboto, Noto, sans-serif; }

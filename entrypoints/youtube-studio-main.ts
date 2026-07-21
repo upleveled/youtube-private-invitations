@@ -8,6 +8,7 @@ import {
   getSelectedStudioVideos,
   isOpenPrivateShareDialog,
   isOpenVisibilityPopup,
+  type StudioVideo,
 } from '../util/youtubeStudio.js';
 
 const buttonId = 'youtube-private-invitations-share-private';
@@ -85,14 +86,14 @@ export default defineUnlistedScript(() => {
 
             const content = document.createElement('div');
             content.className = 'content style-scope ytcp-dialog';
-            const targets = document.createElement('p');
+            const targets = document.createElement('div');
             targets.className =
               'description-text style-scope ytcp-private-video-sharing-dialog youtube-private-invitations-targets';
 
             const addLabel = document.createElement('label');
             addLabel.className = 'youtube-private-invitations-field';
             const addLabelText = document.createElement('span');
-            addLabelText.textContent = 'Add invitees';
+            addLabelText.textContent = 'Add invitees (comma-separated)';
             const addTextarea = document.createElement('textarea');
             addTextarea.name = 'addEmails';
             addTextarea.autofocus = true;
@@ -101,7 +102,7 @@ export default defineUnlistedScript(() => {
             const removeLabel = document.createElement('label');
             removeLabel.className = 'youtube-private-invitations-field';
             const removeLabelText = document.createElement('span');
-            removeLabelText.textContent = 'Remove invitees';
+            removeLabelText.textContent = 'Remove invitees (comma-separated)';
             const removeTextarea = document.createElement('textarea');
             removeTextarea.name = 'removeEmails';
             removeLabel.append(removeLabelText, removeTextarea);
@@ -129,11 +130,7 @@ export default defineUnlistedScript(() => {
 
             dialog.append(header, content, footer);
 
-            targets.textContent = `${selectedVideos.length} selected: ${selectedVideos
-              .map((selectedVideo) => {
-                return selectedVideo.videoId;
-              })
-              .join(', ')}`;
+            targets.append(getVideoList(selectedVideos));
             document.documentElement.append(backdrop, dialog);
 
             const emailChanges = await new Promise<{
@@ -243,6 +240,15 @@ export default defineUnlistedScript(() => {
               });
               cancelButton.addEventListener('click', () => {
                 resolve(null);
+              });
+              // Match the native dialog: backdrop click and Escape both cancel
+              backdrop.addEventListener('click', () => {
+                resolve(null);
+              });
+              dialog.addEventListener('keydown', (keydownEvent) => {
+                if (keydownEvent.key === 'Escape') {
+                  resolve(null);
+                }
               });
               addTextarea.focus();
             }).finally(() => {
@@ -671,6 +677,95 @@ function getStatusMessage(message: string) {
   fragment.append(title);
 
   return fragment;
+}
+
+function getVideoLink(video: StudioVideo) {
+  const link = document.createElement('a');
+
+  link.className = 'youtube-private-invitations-video-link';
+  link.href = video.url;
+  link.rel = 'noopener noreferrer';
+  link.target = '_blank';
+  link.textContent = video.title;
+  link.title = `${video.title} (${video.videoId})`;
+
+  return link;
+}
+
+function getVideoList(videos: StudioVideo[]) {
+  const list = document.createElement('ul');
+
+  list.className = 'youtube-private-invitations-video-list';
+
+  for (const video of videos) {
+    const listItem = document.createElement('li');
+
+    listItem.append(getVideoLink(video));
+    list.append(listItem);
+  }
+
+  return getVideoListContainer(list, videos.length);
+}
+
+function getVideoListContainer(list: HTMLUListElement, videoCount: number) {
+  if (videoCount <= 5) {
+    const container = document.createElement('div');
+
+    container.className = 'youtube-private-invitations-video-list-container';
+    container.append(list);
+    setVideoListScrollState(container, list);
+
+    return container;
+  }
+
+  const details = document.createElement('details');
+  const summary = document.createElement('summary');
+  const summaryText = document.createElement('span');
+
+  details.className = 'youtube-private-invitations-video-details';
+  summaryText.textContent = `${videoCount} selected videos`;
+  summary.append(summaryText, getChevronIcon());
+  details.append(summary, list);
+  setVideoListScrollState(details, list);
+  details.addEventListener('toggle', () => {
+    setVideoListScrollState(details, list);
+  });
+
+  return details;
+}
+
+function setVideoListScrollState(container: HTMLElement, list: HTMLElement) {
+  function updateScrollState() {
+    container.dataset.scrollUp = list.scrollTop > 0 ? 'true' : 'false';
+    container.dataset.scrollDown =
+      list.scrollTop + list.clientHeight < list.scrollHeight - 1
+        ? 'true'
+        : 'false';
+  }
+
+  list.addEventListener('scroll', updateScrollState);
+  window.requestAnimationFrame(updateScrollState);
+}
+
+function getChevronIcon() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+
+  svg.classList.add('youtube-private-invitations-chevron');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '16');
+  svg.setAttribute('height', '16');
+  svg.setAttribute('fill', 'currentColor');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+  path.setAttribute(
+    'd',
+    'M18.707 8.793a1 1 0 00-1.414 0L12 14.086 6.707 8.793a1 1 0 10-1.414 1.414L12 16.914l6.707-6.707a1 1 0 000-1.414Z',
+  );
+  svg.append(path);
+
+  return svg;
 }
 
 function appendStatusDetail(parent: DocumentFragment, label: string, value: string) {

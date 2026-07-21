@@ -10,9 +10,11 @@ function readStudioVideoIdFromHref(href: string) {
   return match.groups.videoId;
 }
 
-type StudioVideo = {
+export type StudioVideo = {
   row: Element;
   videoId: string;
+  title: string;
+  url: string;
 };
 
 export function getSelectedStudioVideos() {
@@ -23,13 +25,26 @@ export function getSelectedStudioVideos() {
       continue;
     }
 
-    const link = row.querySelector<HTMLAnchorElement>('a[href*="/video/"]');
+    const link = row.querySelector<HTMLAnchorElement>(
+      'a#video-title[href*="/video/"]',
+    );
 
     if (!link) {
       throw new Error('Selected video row has no Studio video link');
     }
 
-    selectedVideos.push({ row, videoId: readStudioVideoIdFromHref(link.href) });
+    const title = link.textContent.trim();
+
+    if (!title) {
+      throw new Error(`Could not read video title from ${link.href}`);
+    }
+
+    selectedVideos.push({
+      row,
+      title,
+      url: link.href,
+      videoId: readStudioVideoIdFromHref(link.href),
+    });
   }
 
   if (selectedVideos.length === 0) {
@@ -69,7 +84,9 @@ export function assertStudioVideoRowStillMatchesVideo(
     throw new Error(`Selected video row is no longer visible for ${videoId}`);
   }
 
-  const link = row.querySelector<HTMLAnchorElement>('a[href*="/video/"]');
+  const link = row.querySelector<HTMLAnchorElement>(
+    'a#video-title[href*="/video/"]',
+  );
 
   if (!link) {
     throw new Error(`Selected video row lost its Studio video link for ${videoId}`);
