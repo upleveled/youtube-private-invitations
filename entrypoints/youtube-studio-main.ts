@@ -268,7 +268,7 @@ export default defineUnlistedScript(() => {
                 await new Promise<void>((resolve) => {
                   window.setTimeout(
                     resolve,
-                    1000 + Math.floor(Math.random() * 2000),
+                    300 + Math.floor(Math.random() * 1100),
                   );
                 });
               }

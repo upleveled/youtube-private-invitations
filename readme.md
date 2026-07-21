@@ -33,7 +33,7 @@ Test the manual workflow:
 6. Click Apply
 7. Wait for the status message to finish applying invitees
 
-The extension applies the same add/remove changes to every selected video, disables notification emails, and waits 1-3 seconds between videos.
+The extension applies the same add/remove changes to every selected video, disables notification emails, and waits 0.3-1.4 seconds between video writes.
 
 ## Development
 
