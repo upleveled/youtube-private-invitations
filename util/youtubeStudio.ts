@@ -728,12 +728,17 @@ export function initYoutubeStudio() {
             creatorEntities &&
             creatorEntities.wrappedVideoData &&
             creatorEntities.wrappedVideoData.video &&
-            creatorEntities.wrappedVideoData.video.privateShare &&
             creatorEntities.wrappedVideoData.video.privateShare
-              .privateShareTargets
               ? creatorEntities.wrappedVideoData.video.privateShare
                   .privateShareTargets
-              : [];
+              : undefined;
+
+          // A missing list is not an empty list - fail loudly instead of counting unverified changes as success
+          if (!Array.isArray(privateShareTargets)) {
+            throw new Error(
+              'Update verification failed: response has no privateShareTargets',
+            );
+          }
 
           const resultingEmails = new Set(
             privateShareTargets
