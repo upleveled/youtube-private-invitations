@@ -1,5 +1,6 @@
 allowBuilds:
   esbuild: true
+  spawn-sync: false
   unrs-resolver: false
 # Prevents installation of packages newer than 7 days
 # to mitigate supply chain risks

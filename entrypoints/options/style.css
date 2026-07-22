@@ -1,0 +1,40 @@
+:root {
+  color: #0f0f0f;
+  font-family: Arial, sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  box-sizing: border-box;
+  max-width: 720px;
+  padding: 32px;
+}
+
+h1 {
+  font-size: 24px;
+  line-height: 32px;
+  margin: 0 0 8px;
+}
+
+.version {
+  color: #606060;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+nav {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+a {
+  color: #065fd4;
+}
+
+span {
+  color: #606060;
+}
