@@ -10,8 +10,8 @@
 #youtube-private-invitations-status .youtube-private-invitations-status-icon-neutral { color: #5f6368; }
 #youtube-private-invitations-status .youtube-private-invitations-status-icon-error { color: #f28b82; }
 #youtube-private-invitations-tooltip { background: #0f0f0f; border-radius: 4px; color: #fff; font: 400 12px/16px Roboto, Arial, sans-serif; padding: 6px 8px; pointer-events: none; position: fixed; transform: translate(-50%, -100%); white-space: nowrap; z-index: 20001; }
-#youtube-private-invitations-status .youtube-private-invitations-status-reload { appearance: none; background: none; border: 0; border-radius: var(--ytcp-m-border-radius, 2px); color: #3ea6ff; cursor: pointer; font: 500 14px/20px Roboto, Arial, sans-serif; margin: -6px -8px 0 0; padding: 6px 8px; text-transform: uppercase; white-space: nowrap; }
-#youtube-private-invitations-status .youtube-private-invitations-status-reload:hover { background: rgba(62, 166, 255, .1); }
+#youtube-private-invitations-status .youtube-private-invitations-status-close { appearance: none; background: none; border: 0; border-radius: var(--ytcp-m-border-radius, 2px); color: #3ea6ff; cursor: pointer; font: 500 14px/20px Roboto, Arial, sans-serif; margin: -6px -8px 0 0; padding: 6px 8px; text-transform: uppercase; white-space: nowrap; }
+#youtube-private-invitations-status .youtube-private-invitations-status-close:hover { background: rgba(62, 166, 255, .1); }
 .youtube-private-invitations-video-link { border-radius: 999px; color: inherit; display: inline-block; font-weight: 500; outline: none; padding: 2px 8px; text-decoration: none; }
 .youtube-private-invitations-video-link:hover { background: rgba(255, 255, 255, .1); }
 .youtube-private-invitations-video-link:focus-visible { background: rgba(255, 255, 255, .1); outline: 1px solid currentColor; outline-offset: 2px; }

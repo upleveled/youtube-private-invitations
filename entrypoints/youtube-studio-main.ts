@@ -13,9 +13,17 @@ import {
 
 const buttonId = 'youtube-private-invitations-share-private';
 const statusId = 'youtube-private-invitations-status';
+// Applied changes make Studio's cached state stale, so results are stored here and shown after a reload
+const statusStorageKey = 'youtube-private-invitations-status-result';
+
+type VideoReference = {
+  videoId: string;
+  title: string;
+  url: string;
+};
 
 type VideoInviteeChange = {
-  video: StudioVideo;
+  video: VideoReference;
   addedEmails: string[];
   removedEmails: string[];
   alreadyInvitedEmails: string[];
@@ -30,6 +38,7 @@ export default defineUnlistedScript(() => {
 
     // The UI waits for the DOM, which does not exist yet at document_start
     document.addEventListener('DOMContentLoaded', () => {
+      showPersistedStatus();
       addSharePrivatelyAction();
 
       new MutationObserver(addSharePrivatelyAction).observe(document.body, {
@@ -37,6 +46,31 @@ export default defineUnlistedScript(() => {
         subtree: true,
       });
     });
+
+    // After the reload that follows applied changes, show the stored result against the now-fresh state
+    function showPersistedStatus() {
+      const stored = sessionStorage.getItem(statusStorageKey);
+
+      if (!stored) {
+        return;
+      }
+
+      sessionStorage.removeItem(statusStorageKey);
+
+      try {
+        showStatus(
+          getResultStatusMessage(JSON.parse(stored) as VideoInviteeChange[]),
+          true,
+        );
+      } catch (error) {
+        showStatus(
+          `Could not restore previous status: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          true,
+        );
+      }
+    }
 
     function addSharePrivatelyAction() {
       if (document.getElementById(buttonId)) {
@@ -783,36 +817,35 @@ export default defineUnlistedScript(() => {
               }
             }
 
-            const changedVideoCount = videoInviteeChanges.filter(
-              (videoInviteeChange) => {
-                return (
-                  videoInviteeChange.addedEmails.length > 0 ||
-                  videoInviteeChange.removedEmails.length > 0
-                );
-              },
-            ).length;
-            const failedVideoCount = videoInviteeChanges.filter(
-              (videoInviteeChange) => {
-                return videoInviteeChange.error !== undefined;
-              },
-            ).length;
-            const statusMessage = getStatusMessage(
-              failedVideoCount > 0
-                ? changedVideoCount > 0
-                  ? `Applied changes to ${changedVideoCount} videos, then stopped on a failure`
-                  : 'Stopped on a failure'
-                : changedVideoCount > 0
-                  ? `Applied changes to ${changedVideoCount} videos`
-                  : 'No changes needed',
-            );
+            if (getChangedVideoCount(videoInviteeChanges) > 0) {
+              // Studio's cached invitee state is now stale, so reload and show the result against fresh state
+              sessionStorage.setItem(
+                statusStorageKey,
+                JSON.stringify(
+                  videoInviteeChanges.map((videoInviteeChange) => {
+                    return {
+                      ...videoInviteeChange,
+                      // Drop the live YouTube Studio row before sessionStorage
+                      video: {
+                        videoId: videoInviteeChange.video.videoId,
+                        title: videoInviteeChange.video.title,
+                        url: videoInviteeChange.video.url,
+                      },
+                    };
+                  }),
+                ),
+              );
+              window.location.reload();
+              return;
+            }
 
-            statusMessage.append(getVideoInviteeChangeList(videoInviteeChanges));
-            showStatus(statusMessage, true);
+            showStatus(getResultStatusMessage(videoInviteeChanges), true);
           } finally {
             button.disabled = false;
           }
         })().catch((error: unknown) => {
           console.error(error);
+
           const statusMessage = getStatusMessage(getErrorStatusMessage(error));
 
           if (videoInviteeChanges.length > 0) {
@@ -871,7 +904,36 @@ function getStatusMessage(message: string | Node) {
   return fragment;
 }
 
-function getVideoLink(video: StudioVideo) {
+function getChangedVideoCount(videoInviteeChanges: VideoInviteeChange[]) {
+  return videoInviteeChanges.filter((videoInviteeChange) => {
+    return (
+      videoInviteeChange.addedEmails.length > 0 ||
+      videoInviteeChange.removedEmails.length > 0
+    );
+  }).length;
+}
+
+function getResultStatusMessage(videoInviteeChanges: VideoInviteeChange[]) {
+  const changedVideoCount = getChangedVideoCount(videoInviteeChanges);
+  const failedVideoCount = videoInviteeChanges.filter((videoInviteeChange) => {
+    return videoInviteeChange.error !== undefined;
+  }).length;
+  const statusMessage = getStatusMessage(
+    failedVideoCount > 0
+      ? changedVideoCount > 0
+        ? `Applied changes to ${changedVideoCount} videos, then stopped on a failure`
+        : 'Stopped on a failure'
+      : changedVideoCount > 0
+        ? `Applied changes to ${changedVideoCount} videos`
+        : 'No changes needed',
+  );
+
+  statusMessage.append(getVideoInviteeChangeList(videoInviteeChanges));
+
+  return statusMessage;
+}
+
+function getVideoLink(video: VideoReference) {
   const link = document.createElement('a');
 
   link.className = 'youtube-private-invitations-video-link';
@@ -1164,16 +1226,16 @@ function showStatus(
 
   newStatus.append(content);
 
-  // Final messages stay until the user reloads, since Studio's cached invitee state is now stale
+  // Final messages stay until dismissed - applied changes already reloaded the page to refresh state
   if (sticky) {
-    const reloadButton = document.createElement('button');
-    reloadButton.type = 'button';
-    reloadButton.className = 'youtube-private-invitations-status-reload';
-    reloadButton.textContent = 'Reload';
-    reloadButton.addEventListener('click', () => {
-      window.location.reload();
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'youtube-private-invitations-status-close';
+    closeButton.textContent = 'Close';
+    closeButton.addEventListener('click', () => {
+      newStatus.remove();
     });
-    newStatus.append(reloadButton);
+    newStatus.append(closeButton);
     return;
   }
 
